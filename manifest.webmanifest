@@ -1,0 +1,17 @@
+{
+  "name": "Microgrid Watch",
+  "short_name": "Microgrid",
+  "description": "Authorized standalone microgrid monitoring dashboard",
+  "start_url": "./iot.html",
+  "display": "standalone",
+  "background_color": "#061522",
+  "theme_color": "#071b2d",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230e7490'/%3E%3Cpath d='M35 7 16 36h13l-2 21 21-31H35z' fill='white'/%3E%3C/svg%3E",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
