@@ -1,28 +1,18 @@
 # Microgrid Watch
 
-The dashboard is published at `https://lusemaivugalei-oss.github.io/IoT/iot.html`. GitHub Pages serves the page only; a separate Node.js API receives readings from the ESP32 and serves them publicly to the dashboard.
+The GitHub Pages dashboard reads voltage and current directly from the ESP32 over Bluetooth Low Energy (BLE). It does not need a Wi-Fi connection, cloud API, login, or credentials.
 
-## Deploy the API to Render
+## Connect the ESP32 to the dashboard
 
-1. Push this repository to GitHub, then create a Render Blueprint from the repository. Render uses [`render.yaml`](./render.yaml) to deploy `server.js` and generate the `ESP32_INGEST_TOKEN` environment variable.
-2. In the Render service settings, copy the generated `ESP32_INGEST_TOKEN` value. Keep it private.
-3. Copy the service's HTTPS origin (for example, `https://microgrid-watch-api.onrender.com`). In [`iot.html`](./iot.html), replace `https://YOUR-RENDER-SERVICE.onrender.com` in `API_BASE_URL` with that origin, then push the change so GitHub Pages redeploys.
-4. In Render, check `/api/health` on the service URL. It should return JSON with `"status":"ok"`.
+1. In Arduino IDE, create a sketch, copy the contents of [`Bluetooth.cpp`](./Bluetooth.cpp) into its `.ino` file, select your ESP32 board and port, then upload. The BLE libraries are included with the ESP32 Arduino core.
+2. Power the ESP32 and open [the dashboard](https://lusemaivugalei-oss.github.io/IoT/iot.html) on the PC in Chrome or Edge. Web Bluetooth requires a supported browser and a secure HTTPS page.
+3. Click **Connect Bluetooth**, choose **Microgrid ESP32** in the browser's device picker, and approve the connection. Keep the ESP32 within Bluetooth range.
+4. The dashboard receives voltage/current notifications roughly 1.5 times per second and plots them in the browser. Click **Disconnect Bluetooth** to end the connection.
 
-## Configure and flash the ESP32
+The BLE service UUID is `19b10000-e8f2-537e-4f6c-d104768a1214`; its read/notify characteristic UUID is `19b10001-e8f2-537e-4f6c-d104768a1214`. The characteristic sends voltage and current as two little-endian 32-bit floats, fitting within the default BLE MTU.
 
-1. Copy [`secrets.example.h`](./secrets.example.h) to `secrets.h` in the same directory as `Bluetooth.cpp`.
-2. Set `WIFI_SSID`, `WIFI_PASSWORD`, `TELEMETRY_API_URL` (the Render origin followed by `/api/ingest`), and `TELEMETRY_TOKEN` (the same value as Render's `ESP32_INGEST_TOKEN`) in `secrets.h`.
-3. Compile and flash `Bluetooth.cpp` with the ESP32 Arduino platform. The firmware uploads readings over certificate-validated HTTPS every two seconds while keeping the local HTTP and Bluetooth sensor interfaces.
-
-`secrets.h` is excluded from Git. Do not commit it or put the Render token in `iot.html`; the browser only reads public sensor data. The firmware uses the public ISRG Root X1 CA certificate to verify the Render HTTPS connection.
-
-## Public access and data flow
-
-The page polls `GET /api/data` every two seconds. Anyone can read the live voltage and current values from the dashboard/API; the ingest endpoint requires the private bearer token so the public cannot submit readings. The API keeps the latest reading in memory, so it will return “no sensor reading” until the ESP32 next uploads after a service restart.
-
-Do not publish readings if they are sensitive. The ingest token is a write credential, not a way to make public readings private.
+The connection is direct from the PC browser to the ESP32. Each PC that needs readings must connect to the ESP32 over BLE; GitHub Pages does not relay sensor data.
 
 ## Sensors
 
-The ESP32 firmware reads an ACS712-20A current sensor on GPIO34 and a battery voltage sensor on GPIO35. The current calibration uses 0.100 V/A sensitivity, a 2.32 V zero-current offset, 10 averaged ADC samples, and a Kalman filter. Battery voltage uses a 0.93 slope, 0.95 V regression offset, a 4.8 divider ratio, and 20 averaged ADC samples. Verify the calibration against your hardware and keep ADC inputs within 0–3.3 V.
+The ESP32 firmware reads an ACS712-20A current sensor on GPIO34 and a battery voltage sensor on GPIO35. Current uses 0.100 V/A sensitivity, a 2.32 V zero-current offset, 10 averaged ADC samples, and a Kalman filter. Battery voltage uses a 0.93 slope, 0.95 V regression offset, a 4.8 divider ratio, and 20 averaged ADC samples. Verify calibration against the hardware and keep ADC inputs within 0–3.3 V.

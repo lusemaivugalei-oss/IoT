@@ -39,7 +39,7 @@
 <body>
     <main id="appShell" class="app-shell">
         <header>
-            <div><div class="brand-mark">Standalone microgrid system</div><h1>Live operations</h1><p class="subtle">Public dashboard · readings are visible to anyone with this link.</p><div class="status-line"><span class="pulse"></span><span id="lastUpdated">Waiting for sensor data</span></div></div>
+            <div><div class="brand-mark">Standalone microgrid system</div><h1>Live operations</h1><p class="subtle">Connect to the ESP32 over Bluetooth to view live readings on this device.</p><div class="status-line"><span class="pulse"></span><span id="lastUpdated">Connect Bluetooth to begin</span></div></div>
             <div class="header-actions"><button id="installButton" class="action-button hidden" type="button">Install app</button><button id="bluetoothButton" class="action-button" type="button">Connect Bluetooth</button><button id="qrButton" class="action-button" type="button">QR access</button></div>
         </header>
         <section class="metrics" aria-label="Current sensor readings">
@@ -57,10 +57,8 @@
     
         const MAX_CURRENT = 5.5, HISTORY_LIMIT = 300, HISTORY_WINDOW_MS = 5 * 60 * 1000;
         const HISTORY_KEY = "iotCurrentSensorHistory";
-        const API_BASE_URL = "https://YOUR-RENDER-SERVICE.onrender.com";
-        const SENSOR_DATA_URL = `${API_BASE_URL}/api/data`;
         const BLE_SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214", BLE_READING_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214";
-        let sensorHistory = loadSensorHistory(), charts, deferredInstallPrompt, bluetoothDevice, bluetoothCharacteristic, bluetoothActive = false, lastServerTimestamp;
+        let sensorHistory = loadSensorHistory(), charts, deferredInstallPrompt, bluetoothDevice, bluetoothCharacteristic, bluetoothActive = false;
 
         document.getElementById("qrButton").addEventListener("click", () => { const qr = document.getElementById("qrcode"); qr.innerHTML = ""; new QRCode(qr, { text: window.location.href, width: 210, height: 210, colorDark: "#071b2d", colorLight: "#ffffff" }); document.getElementById("qrDialog").showModal(); });
         document.getElementById("closeQrButton").addEventListener("click", () => document.getElementById("qrDialog").close());
@@ -68,20 +66,76 @@
         window.addEventListener("beforeinstallprompt", event => { event.preventDefault(); deferredInstallPrompt = event; document.getElementById("installButton").classList.remove("hidden"); });
         document.getElementById("installButton").addEventListener("click", async () => { if (!deferredInstallPrompt) return; deferredInstallPrompt.prompt(); await deferredInstallPrompt.userChoice; deferredInstallPrompt = null; document.getElementById("installButton").classList.add("hidden"); });
         charts = createCharts();
-        getSensorData();
 
         function loadSensorHistory() { try { const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); return Array.isArray(saved) ? saved.filter(reading => Number.isFinite(reading.timestamp) && Number.isFinite(reading.current)).slice(-HISTORY_LIMIT) : []; } catch { return []; } }
         function createCharts() { const makeChart = (canvasId, label, property, color, unit) => { const now = Date.now(); const options = { responsive: true, maintainAspectRatio: false, scales: { x: { type: "linear", min: now - HISTORY_WINDOW_MS, max: now, ticks: { callback: value => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }, grid: { color: "#1d4558" } }, y: { beginAtZero: true, grid: { color: "#1d4558" } } }, plugins: { legend: { labels: { color: "#dcebf2" } } } }; return new Chart(document.getElementById(canvasId), { type: "line", data: { datasets: [{ label: `${label} (${unit})`, data: sensorHistory.filter(reading => Number.isFinite(reading[property])).map(reading => ({ x: reading.timestamp, y: reading[property] })), borderColor: color, backgroundColor: color, tension: .25, pointRadius: 2, fill: false }] }, options }); }; return { voltage: makeChart("voltageChart", "Battery voltage", "voltage", "#39d0c5", "V"), current: makeChart("currentChart", "Current", "current", "#78c86b", "A") }; }
         function updateCharts() { const now = Date.now(); Object.entries(charts).forEach(([property, chart]) => { chart.data.datasets[0].data = sensorHistory.filter(reading => Number.isFinite(reading[property])).map(reading => ({ x: reading.timestamp, y: reading[property] })); chart.options.scales.x.min = now - HISTORY_WINDOW_MS; chart.options.scales.x.max = now; chart.update("none"); }); }
         function recordReading(voltage, current) { sensorHistory.push({ timestamp: Date.now(), voltage, current }); sensorHistory = sensorHistory.slice(-HISTORY_LIMIT); localStorage.setItem(HISTORY_KEY, JSON.stringify(sensorHistory)); updateCharts(); }
         function updateDashboard(voltage, current) { document.getElementById("voltage").textContent = `${voltage.toFixed(2)} V`; document.getElementById("current").textContent = `${current.toFixed(2)} A`; document.getElementById("lastUpdated").textContent = `Updated ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`; const active = Math.abs(current) > MAX_CURRENT; document.querySelector(".current").classList.toggle("danger", active); const alarm = document.getElementById("alarm"); alarm.classList.toggle("danger", active); alarm.innerHTML = active ? "<span>⚠</span><span>CURRENT OUT OF RANGE</span>" : "<span>●</span><span>System status: normal</span>"; if (active) document.getElementById("alarmSound").play().catch(() => {}); }
-        function setBluetoothStatus(connected, message) { const button = document.getElementById("bluetoothButton"); button.textContent = connected ? "Bluetooth connected" : "Connect Bluetooth"; button.classList.toggle("connected", connected); document.getElementById("lastUpdated").textContent = message; }
-        async function connectBluetooth() { if (!navigator.bluetooth) { setBluetoothStatus(false, "Bluetooth requires Chrome or Edge over HTTPS or localhost"); return; } try { setBluetoothStatus(false, "Searching for ESP32 Bluetooth..."); bluetoothDevice = await navigator.bluetooth.requestDevice({ filters: [{ services: [BLE_SERVICE_UUID] }] }); bluetoothDevice.addEventListener("gattserverdisconnected", disconnectBluetooth); const server = await bluetoothDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE_UUID); bluetoothCharacteristic = await service.getCharacteristic(BLE_READING_UUID); await bluetoothCharacteristic.startNotifications(); bluetoothCharacteristic.addEventListener("characteristicvaluechanged", handleBluetoothReading); bluetoothActive = true; setBluetoothStatus(true, "Bluetooth sensor connected"); const initialReading = await bluetoothCharacteristic.readValue(); handleBluetoothReading({ target: { value: initialReading } }); } catch (error) { bluetoothActive = false; setBluetoothStatus(false, error.name === "NotFoundError" ? "Bluetooth pairing cancelled" : "Bluetooth connection failed"); } }
-        function disconnectBluetooth() { bluetoothActive = false; bluetoothCharacteristic = null; setBluetoothStatus(false, "Bluetooth sensor disconnected"); }
-        function handleBluetoothReading(event) { try { const data = JSON.parse(new TextDecoder().decode(event.target.value)); const values = [data.voltage, data.current]; if (!values.every(Number.isFinite)) throw new Error("Invalid sensor reading"); updateDashboard(...values); recordReading(...values); } catch { setBluetoothStatus(false, "Invalid Bluetooth sensor data"); } }
-        async function getSensorData() { if (bluetoothActive) return; if (API_BASE_URL.includes("YOUR-RENDER-SERVICE")) { document.getElementById("lastUpdated").textContent = "Set the Render API URL in iot.html"; return; } try { const response = await fetch(SENSOR_DATA_URL, { cache: "no-store" }); if (!response.ok) throw new Error(response.status); const data = await response.json(); const values = [data.voltage, data.current]; if (!values.every(Number.isFinite) || !Number.isFinite(data.timestamp)) throw new Error("Invalid sensor reading"); if (data.timestamp !== lastServerTimestamp) { lastServerTimestamp = data.timestamp; updateDashboard(...values); recordReading(...values); } if (Date.now() - data.timestamp > 10000) document.getElementById("lastUpdated").textContent = "Latest reading is stale; check the ESP32 connection"; } catch { document.getElementById("lastUpdated").textContent = "Sensor API unavailable; check the API URL and ESP32 connection"; } }
+        function setBluetoothStatus(connected, message) { const button = document.getElementById("bluetoothButton"); button.textContent = connected ? "Disconnect Bluetooth" : "Connect Bluetooth"; button.classList.toggle("connected", connected); document.getElementById("lastUpdated").textContent = message; }
+        async function connectBluetooth() {
+            if (bluetoothActive) {
+                bluetoothDevice?.gatt?.disconnect();
+                return;
+            }
+            if (!window.isSecureContext) {
+                setBluetoothStatus(false, "Open this dashboard over HTTPS to use Bluetooth");
+                return;
+            }
+            if (!navigator.bluetooth) {
+                setBluetoothStatus(false, "Web Bluetooth is unavailable; use Chrome or Edge on this PC");
+                return;
+            }
+
+            setBluetoothStatus(false, "Choose Microgrid ESP32 in the Bluetooth device picker");
+            try {
+                bluetoothDevice = await navigator.bluetooth.requestDevice({ filters: [{ services: [BLE_SERVICE_UUID] }] });
+                bluetoothDevice.addEventListener("gattserverdisconnected", disconnectBluetooth);
+                const server = await bluetoothDevice.gatt.connect();
+                const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+                bluetoothCharacteristic = await service.getCharacteristic(BLE_READING_UUID);
+                await bluetoothCharacteristic.startNotifications();
+                bluetoothCharacteristic.addEventListener("characteristicvaluechanged", handleBluetoothReading);
+                bluetoothActive = true;
+                setBluetoothStatus(true, "Bluetooth connected — receiving live ESP32 readings");
+                handleBluetoothReading({ target: { value: await bluetoothCharacteristic.readValue() } });
+            } catch (error) {
+                console.error("Bluetooth connection failed:", error);
+                bluetoothDevice?.removeEventListener("gattserverdisconnected", disconnectBluetooth);
+                bluetoothDevice?.gatt?.disconnect();
+                bluetoothDevice = null;
+                bluetoothCharacteristic = null;
+                bluetoothActive = false;
+                const message = error.name === "NotFoundError"
+                    ? "Bluetooth selection cancelled"
+                    : error.name === "SecurityError"
+                        ? "Allow Bluetooth access and use Chrome or Edge over HTTPS"
+                        : "Could not connect to the ESP32; check power and Bluetooth range";
+                setBluetoothStatus(false, message);
+            }
+        }
+        function disconnectBluetooth() {
+            bluetoothActive = false;
+            bluetoothCharacteristic = null;
+            bluetoothDevice = null;
+            setBluetoothStatus(false, "Bluetooth disconnected — click Connect Bluetooth to reconnect");
+        }
+        function handleBluetoothReading(event) {
+            try {
+                const reading = event.target.value;
+                const data = reading.byteLength === 8
+                    ? { voltage: reading.getFloat32(0, true), current: reading.getFloat32(4, true) }
+                    : JSON.parse(new TextDecoder().decode(reading));
+                const values = [data.voltage, data.current];
+                if (!values.every(Number.isFinite)) throw new Error("ESP32 returned invalid sensor readings");
+                updateDashboard(...values);
+                recordReading(...values);
+            } catch (error) {
+                console.error("Could not read Bluetooth sensor data:", error);
+                setBluetoothStatus(bluetoothActive, "Received invalid Bluetooth sensor data");
+            }
+        }
         if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
-        setInterval(getSensorData, 2000);
     </script>
 </body>
 </html>
