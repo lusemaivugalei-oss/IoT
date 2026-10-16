@@ -1,0 +1,14 @@
+{
+  "name": "microgrid-watch",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Microgrid Watch dashboard and ESP32 telemetry server",
+  "main": "server.js",
+  "scripts": {
+    "server": "node server.js",
+    "start": "node server.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

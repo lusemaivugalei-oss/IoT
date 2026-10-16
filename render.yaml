@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: microgrid-watch-api
+    runtime: node
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: ESP32_INGEST_TOKEN
+        generateValue: true

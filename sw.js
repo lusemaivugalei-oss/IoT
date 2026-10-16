@@ -1,4 +1,4 @@
-const CACHE_NAME = "microgrid-watch-v1";
+const CACHE_NAME = "microgrid-watch-v5";
 const APP_FILES = ["./iot.html", "./manifest.webmanifest"];
 
 self.addEventListener("install", event => {

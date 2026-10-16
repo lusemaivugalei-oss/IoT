@@ -1,5 +1,6 @@
-Bluetooth.cpp
-server.js
-package.json
 *.code-workspace
 .vscode/
+ngrok.yml
+secrets.h
+.env
+node_modules/
