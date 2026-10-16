@@ -1,21 +1,12 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="robots" content="noindex">
-    <title>Microgrid Watch — Private dashboard</title>
+    <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="0; url=iot.html">
+    <title>Microgrid Watch</title>
 </head>
 <body>
-    <main>
-        <h1>Private dashboard</h1>
-        <p>The dashboard now requires an authorised account and is hosted separately from GitHub Pages.</p>
-        <p>Open the private dashboard at <a href="https://microgrid-watch-api.onrender.com/">the Microgrid Watch Render service</a> and sign in.</p>
-    </main>
-    <script>
-        localStorage.removeItem("iotCurrentSensorHistory");
-        if ("caches" in window) caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith("microgrid-watch-")).map(key => caches.delete(key))));
-        if ("serviceWorker" in navigator) navigator.serviceWorker.getRegistrations().then(registrations => registrations.forEach(registration => registration.unregister()));
-    </script>
+    <p>Opening Microgrid Watch...</p>
+    <script>window.location.replace("iot.html");</script>
 </body>
 </html>

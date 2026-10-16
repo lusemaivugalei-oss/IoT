@@ -6,28 +6,10 @@ const { URL } = require("node:url");
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
+const DASHBOARD_ORIGIN = "https://lusemaivugalei-oss.github.io";
 const ESP32_INGEST_TOKEN = process.env.ESP32_INGEST_TOKEN || "";
-const SESSION_COOKIE = "microgrid_session";
-const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-const PUBLIC_FILES = new Set(["index.html", "iot.html", "manifest.webmanifest", "sw.js", "alarm.mp3"]);
-const sessions = new Map();
+const PUBLIC_FILES = new Set(["index.html", "iot.html", "manifest.webmanifest", "sw.js"]);
 let latestReading;
-let authorizedUsers;
-
-try {
-    const configuredUsers = JSON.parse(process.env.MICROGRID_USERS_JSON || "null");
-    if (!configuredUsers || typeof configuredUsers !== "object" || Array.isArray(configuredUsers)) {
-        throw new Error();
-    }
-    const entries = Object.entries(configuredUsers);
-    if (!entries.length || entries.some(([username, password]) => !username.trim() || typeof password !== "string" || !password)) {
-        throw new Error();
-    }
-    authorizedUsers = new Map(entries);
-} catch {
-    console.error('Set MICROGRID_USERS_JSON to a JSON object of authorized usernames and passwords, e.g. {"user":"strong-password"}.');
-    process.exit(1);
-}
 
 if (ESP32_INGEST_TOKEN.length < 32) {
     console.error("Set ESP32_INGEST_TOKEN to a random value of at least 32 characters before starting the server.");
@@ -68,29 +50,13 @@ function sendJson(res, code, value, headers = {}) {
     res.end(JSON.stringify(value));
 }
 
-function getSessionToken(req) {
-    const cookie = (req.headers.cookie || "")
-        .split(";")
-        .map(value => value.trim())
-        .find(value => value.startsWith(`${SESSION_COOKIE}=`));
-    return cookie ? cookie.slice(SESSION_COOKIE.length + 1) : "";
-}
-
-function hasValidSession(req) {
-    const token = getSessionToken(req);
-    const expiresAt = sessions.get(token);
-    if (!expiresAt) return false;
-    if (expiresAt <= Date.now()) {
-        sessions.delete(token);
-        return false;
+function applyCors(req, res) {
+    res.setHeader("Vary", "Origin");
+    if (req.headers.origin === DASHBOARD_ORIGIN) {
+        res.setHeader("Access-Control-Allow-Origin", DASHBOARD_ORIGIN);
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     }
-    return true;
-}
-
-function secureCookie(req, value, maxAge) {
-    const forwardedProtocol = (req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
-    const secure = req.socket.encrypted || forwardedProtocol === "https";
-    return `${SESSION_COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
 }
 
 async function readJsonBody(req) {
@@ -106,50 +72,6 @@ async function readJsonBody(req) {
         chunks.push(chunk);
     }
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-}
-
-function passwordMatches(expected, provided) {
-    const expectedHash = crypto.createHash("sha256").update(expected).digest();
-    const providedHash = crypto.createHash("sha256").update(provided).digest();
-    return crypto.timingSafeEqual(expectedHash, providedHash);
-}
-
-async function handleLogin(req, res) {
-    if (!req.headers["content-type"]?.startsWith("application/json")) {
-        return sendText(res, 415, "Expected application/json");
-    }
-
-    let body;
-    try {
-        body = await readJsonBody(req);
-    } catch (error) {
-        return sendText(res, error.statusCode || 400, "Invalid login request");
-    }
-
-    const username = typeof body?.username === "string" ? body.username.trim() : "";
-    const password = typeof body?.password === "string" ? body.password : "";
-    const expectedPassword = authorizedUsers.get(username);
-    const validPassword = passwordMatches(expectedPassword || "invalid-user-password", password);
-    if (!expectedPassword || !validPassword) {
-        return sendJson(res, 401, { error: "Username or password is not authorised." });
-    }
-
-    const now = Date.now();
-    for (const [token, expiresAt] of sessions) {
-        if (expiresAt <= now) sessions.delete(token);
-    }
-    const token = crypto.randomBytes(32).toString("base64url");
-    sessions.set(token, now + SESSION_TTL_MS);
-    return sendJson(res, 200, { authenticated: true }, {
-        "Set-Cookie": secureCookie(req, token, SESSION_TTL_MS / 1000)
-    });
-}
-
-function handleLogout(req, res) {
-    sessions.delete(getSessionToken(req));
-    return sendJson(res, 200, { authenticated: false }, {
-        "Set-Cookie": secureCookie(req, "", 0)
-    });
 }
 
 function validIngestToken(req) {
@@ -186,6 +108,8 @@ async function handleIngest(req, res) {
 }
 
 async function handleRequest(req, res) {
+    applyCors(req, res);
+
     let pathname;
     try {
         pathname = decodeURIComponent(new URL(req.url, `http://${req.headers.host || "localhost"}`).pathname);
@@ -193,20 +117,13 @@ async function handleRequest(req, res) {
         return sendText(res, 400, "Bad Request");
     }
 
-    if (pathname === "/api/login") {
-        return req.method === "POST" ? handleLogin(req, res) : sendText(res, 405, "Method Not Allowed");
-    }
-    if (pathname === "/api/logout") {
-        return req.method === "POST" ? handleLogout(req, res) : sendText(res, 405, "Method Not Allowed");
-    }
-    if (pathname === "/api/session") {
-        return req.method === "GET"
-            ? sendJson(res, 200, { authenticated: hasValidSession(req) })
-            : sendText(res, 405, "Method Not Allowed");
+    if (pathname.startsWith("/api/") && req.method === "OPTIONS") {
+        res.writeHead(204);
+        return res.end();
     }
     if (pathname === "/api/health") {
         return req.method === "GET"
-            ? sendJson(res, 200, { status: "ok" })
+            ? sendJson(res, 200, { status: "ok", hasReading: Boolean(latestReading) })
             : sendText(res, 405, "Method Not Allowed");
     }
     if (pathname === "/api/ingest") {
@@ -214,7 +131,6 @@ async function handleRequest(req, res) {
     }
     if (pathname === "/api/data") {
         if (req.method !== "GET") return sendText(res, 405, "Method Not Allowed");
-        if (!hasValidSession(req)) return sendJson(res, 401, { error: "Authentication required" });
         if (!latestReading) return sendJson(res, 503, { error: "No sensor reading has been received yet" });
         return sendJson(res, 200, latestReading);
     }
@@ -234,7 +150,7 @@ async function handleRequest(req, res) {
 
         res.writeHead(200, {
             "Content-Type": CONTENT_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream",
-            "Cache-Control": "no-store"
+            "Cache-Control": "no-cache"
         });
         if (req.method === "HEAD") return res.end();
 

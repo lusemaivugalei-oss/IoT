@@ -25,11 +25,11 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure Pages
         uses: actions/configure-pages@v5
-      - name: Prepare private-dashboard notice
+      - name: Upload site
         run: |
           mkdir -p _site
-          cp index.html _site/index.html
-          cp index.html _site/iot.html
+          cp iot.html manifest.webmanifest sw.js _site/
+          if [ -f alarm.mp3 ]; then cp alarm.mp3 _site/; fi
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

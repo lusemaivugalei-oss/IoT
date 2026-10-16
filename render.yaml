@@ -6,7 +6,5 @@ services:
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
-      - key: MICROGRID_USERS_JSON
-        sync: false
       - key: ESP32_INGEST_TOKEN
         generateValue: true
