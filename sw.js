@@ -1,4 +1,4 @@
-const CACHE_NAME = "microgrid-watch-v5";
+const CACHE_NAME = "microgrid-watch-v6";
 const APP_FILES = ["./iot.html", "./manifest.webmanifest"];
 
 self.addEventListener("install", event => {
@@ -13,5 +13,6 @@ self.addEventListener("activate", event => {
 
 self.addEventListener("fetch", event => {
     if (event.request.method !== "GET") return;
+    if (new URL(event.request.url).pathname.startsWith("/api/")) return;
     event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
 });

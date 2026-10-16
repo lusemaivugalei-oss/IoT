@@ -1,7 +1,7 @@
 {
   "name": "Microgrid Watch",
   "short_name": "Microgrid",
-  "description": "Public standalone microgrid monitoring dashboard",
+  "description": "Private standalone microgrid monitoring dashboard",
   "start_url": "./iot.html",
   "display": "standalone",
   "background_color": "#061522",
