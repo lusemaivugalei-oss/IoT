@@ -6,8 +6,8 @@ The GitHub Pages dashboard reads voltage and current directly from the ESP32 ove
 
 1. In Arduino IDE, create a sketch, copy the contents of [`Bluetooth.cpp`](./Bluetooth.cpp) into its `.ino` file, select your ESP32 board and port, then upload. The BLE libraries are included with the ESP32 Arduino core.
 2. Power the ESP32 and open [the dashboard](https://lusemaivugalei-oss.github.io/IoT/iot.html) on the PC in Chrome or Edge. Web Bluetooth requires a supported browser and a secure HTTPS page.
-3. Click **Connect Bluetooth**, choose **Microgrid ESP32** in the browser's device picker, and approve the connection. Keep the ESP32 within Bluetooth range.
-4. The dashboard receives voltage/current notifications roughly 1.5 times per second and plots them in the browser. Click **Disconnect Bluetooth** to end the connection.
+3. The first time, click **Connect Bluetooth**, choose **Microgrid ESP32** in the browser's device picker, and approve the connection. This one-time browser permission is required; a website cannot silently pair with a new Bluetooth device.
+4. The dashboard receives voltage/current notifications roughly 1.5 times per second and plots them in the browser. After the first approval, it reconnects automatically when reopened and retries while the authorized ESP32 is powered on and in range. Click **Disconnect Bluetooth** to end the connection.
 
 The BLE service UUID is `19b10000-e8f2-537e-4f6c-d104768a1214`; its read/notify characteristic UUID is `19b10001-e8f2-537e-4f6c-d104768a1214`. The characteristic sends voltage and current as two little-endian 32-bit floats, fitting within the default BLE MTU.
 
