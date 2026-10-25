@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { URL } = require("node:url");
+const { logReading } = require("./logger");
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
@@ -271,6 +272,7 @@ async function storeReading(req, res) {
         timestamp: Date.now()
     };
     readingHistory.push(latestReading);
+    logReading(latestReading);
     const oldest = latestReading.timestamp - HISTORY_WINDOW_MS;
     readingHistory = readingHistory.filter(entry => entry.timestamp >= oldest).slice(-HISTORY_LIMIT);
     return sendJson(res, 200, { accepted: true });
