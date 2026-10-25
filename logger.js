@@ -17,7 +17,8 @@ const path = require("path");
 const HEADER = [
     "Timestamp", "Unix_ms",
     "Solar_Voltage_V", "Solar_Current_A", "Solar_Power_W",
-    "Battery_Voltage_V", "Battery_Current_A", "Battery_Power_W"
+    "Battery_Voltage_V", "Battery_Current_A", "Battery_Power_W",
+    "Battery_SOC_pct", "Load"
 ].join(",");
 
 // ---------- where to save ----------
@@ -40,7 +41,19 @@ function localDate(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pa
 function localStamp(d) { return `${localDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
 function num(value, digits) { return Number.isFinite(value) ? value.toFixed(digits) : ""; }
 function power(v, i) { return Number.isFinite(v) && Number.isFinite(i) ? v * i : NaN; }
-function logFileFor(d) { return path.join(LOG_DIR, `microgrid_log_${localDate(d)}.csv`); }  // new file each day
+// New file each day. A file written with older columns is left as it is
+// and the readings go to the next free name (microgrid_log_<date>_2.csv, ...).
+const logFiles = new Map();
+function logFileFor(d) {
+    const date = localDate(d);
+    if (logFiles.has(date)) return logFiles.get(date);
+    for (let n = 1; ; n++) {
+        const file = path.join(LOG_DIR, `microgrid_log_${date}${n > 1 ? `_${n}` : ""}.csv`);
+        let firstLine = "";
+        try { firstLine = fs.readFileSync(file, "utf8").split(/\r?\n/, 1)[0]; } catch {}
+        if (!firstLine || firstLine === HEADER) { logFiles.set(date, file); return file; }
+    }
+}
 
 // ---------- writing (survives the file being open in Excel) ----------
 let pending = [];        // rows waiting to be written
@@ -78,8 +91,9 @@ function flush() {
     pending = stillPending;
 }
 
-// voltage/current = solar (GPIO35/34); voltage32/current33 = battery (GPIO32/33)
-function logReading(reading) {
+// voltage/current = solar (GPIO35/34); voltage32/current33 = battery (GPIO32/33).
+// loadState is the relay state confirmed by the ESP32: "closed", "open" or null.
+function logReading(reading, loadState) {
     const sv = reading.voltage, si = reading.current, bv = reading.voltage32, bi = reading.current33;
     const when = new Date(reading.timestamp);
     pending.push({
@@ -87,7 +101,8 @@ function logReading(reading) {
         line: [
             localStamp(when), reading.timestamp,
             num(sv, 3), num(si, 4), num(power(sv, si), 3),
-            num(bv, 3), num(bi, 4), num(power(bv, bi), 3)
+            num(bv, 3), num(bi, 4), num(power(bv, bi), 3),
+            num(reading.soc, 1), loadState === "closed" ? "Connected" : loadState === "open" ? "Disconnected" : ""
         ].join(",")
     });
     flush();

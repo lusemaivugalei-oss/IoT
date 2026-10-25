@@ -272,7 +272,7 @@ async function storeReading(req, res) {
         timestamp: Date.now()
     };
     readingHistory.push(latestReading);
-    logReading(latestReading);
+    logReading(latestReading, relay.state);
     const oldest = latestReading.timestamp - HISTORY_WINDOW_MS;
     readingHistory = readingHistory.filter(entry => entry.timestamp >= oldest).slice(-HISTORY_LIMIT);
     return sendJson(res, 200, { accepted: true });
