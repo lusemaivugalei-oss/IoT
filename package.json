@@ -7,7 +7,8 @@
   "scripts": {
     "server": "node --env-file-if-exists=.env server.js",
     "ble": "python ble_bridge.py",
-    "tunnel": "ngrok http 3000 --url https://pasty-tiptoeing-excretory.ngrok-free.dev",
+    "tunnel": "cloudflared tunnel --no-autoupdate --protocol http2 --url http://localhost:3000",
+    "tunnel:ngrok": "ngrok http 3000 --url https://pasty-tiptoeing-excretory.ngrok-free.dev",
     "start": "concurrently --kill-others --names API,BLE \"npm run server\" \"npm run ble\""
   },
   "devDependencies": {

@@ -1,7 +1,8 @@
 // Shared by the dashboard and sign-in pages. GitHub Pages only hosts the page,
-// so there the API calls go to this PC's server through the ngrok tunnel.
-const NGROK_API = "https://pasty-tiptoeing-excretory.ngrok-free.dev";
-const API_BASE = location.hostname.endsWith("github.io") ? NGROK_API : "";
+// so there the API calls go to this PC's server through the Cloudflare tunnel
+// (npm run tunnel). Its free address changes on every restart, so update it here.
+const TUNNEL_API = "https://deposits-oscar-copies-dont.trycloudflare.com";
+const API_BASE = location.hostname.endsWith("github.io") ? TUNNEL_API : "";
 const SESSION_KEY = "microgridSession";
 
 // The login is kept as a token rather than a cookie because browsers block
