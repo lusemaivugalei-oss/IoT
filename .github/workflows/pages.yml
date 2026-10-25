@@ -28,7 +28,7 @@ jobs:
       - name: Upload site
         run: |
           mkdir -p _site
-          cp iot.html manifest.webmanifest sw.js _site/
+          cp index.html iot.html login.html api.js sw.js _site/
           if [ -f alarm.mp3 ]; then cp alarm.mp3 _site/; fi
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

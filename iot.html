@@ -8,13 +8,14 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230e7490'/%3E%3Cpath d='M35 7 16 36h13l-2 21 21-31H35z' fill='white'/%3E%3C/svg%3E">
     <title>Microgrid Watch</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="api.js"></script>
     <style>
         :root { --ink: #3e2b20; --muted: #755f4b; --panel: #fffaf0; --line: #cbb596; --cyan: #8a4d2f; --amber: #b47a32; --red: #a63d32; }
         * { box-sizing: border-box; }
         body { isolation: isolate; margin: 0; min-width: 320px; color: var(--ink); background: #f2e8d5; font-family: "Trebuchet MS", "Segoe UI", sans-serif; }
         body::before { content: ""; position: fixed; z-index: -1; inset: 0; pointer-events: none; opacity: .36; background-color: #f2e8d5; background-image: linear-gradient(125deg, rgba(255,250,240,.8), transparent 58%), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='none' stroke='%238a4d2f' stroke-width='2' stroke-opacity='.52'%3E%3Cpath d='M60 8 72 20 60 32 48 20Z M60 44 76 60 60 76 44 60Z M60 88 72 100 60 112 48 100Z M8 60 20 48 32 60 20 72Z M88 60 100 48 112 60 100 72Z'/%3E%3Cpath d='M12 12h18v6H18v12h-6z M90 12h18v18h-6V18H90z M12 90h6v12h12v6H12z M102 90h6v18H90v-6h12z'/%3E%3C/g%3E%3Cg fill='%23b47a32' fill-opacity='.55'%3E%3Ccircle cx='60' cy='60' r='3'/%3E%3Ccircle cx='20' cy='20' r='2'/%3E%3Ccircle cx='100' cy='20' r='2'/%3E%3Ccircle cx='20' cy='100' r='2'/%3E%3Ccircle cx='100' cy='100' r='2'/%3E%3C/g%3E%3C/svg%3E"); background-size: auto, 120px 120px; }
         button, input { font: inherit; }
-        .hidden { display: none !important; }
+        .hidden, [hidden] { display: none !important; }
         .brand-mark { color: var(--cyan); font-size: 12px; font-weight: bold; letter-spacing: .18em; text-transform: uppercase; }
         h1, h2, p { margin-top: 0; } h1 { margin: 12px 0 8px; font-family: Georgia, serif; font-size: clamp(32px, 6vw, 48px); line-height: 1; } h2 { font-size: 18px; }
         .subtle { color: var(--muted); line-height: 1.55; }
@@ -47,6 +48,15 @@
         #apiStatus.api-error::before, #apiStatus.api-stale::before { background: #a63d32; }
         #apiStatus.api-waiting::before { background: var(--amber); }
         .bridge-panel, .relay-panel { margin-top: 14px; }
+        .status-panel { margin-bottom: 14px; }
+        .status-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+        .status-item { min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 8px; background: var(--panel); }
+        .status-item .metric-label { display: block; font-size: 11px; }
+        .status-item strong { display: block; margin: 6px 0 3px; font-size: 16px; }
+        .status-item small { display: block; color: var(--muted); font-size: 12px; line-height: 1.4; }
+        .status-item.ok { border-left-color: #38834b; } .status-item.ok strong { color: #28623a; }
+        .status-item.warn { border-left-color: var(--amber); } .status-item.warn strong { color: #8a5a1f; }
+        .status-item.fault { border-left-color: var(--red); } .status-item.fault strong { color: #9a3b2c; }
         .relay-controls { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; } .relay-controls .action-button:disabled { opacity: .5; cursor: default; border-color: var(--line); } .relay-controls .action-button.active { border-color: var(--cyan); color: var(--cyan); font-weight: bold; }
         #relayStatus.relay-open { color: #9a3b2c; } #relayStatus.relay-closed { color: #28623a; }
         .telemetry-panel { margin-top: 14px; } .telemetry-form { display: flex; gap: 9px; align-items: center; } .telemetry-form label { flex: 1; } .telemetry-form input { width: 100%; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: white; } .telemetry-status { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
@@ -56,11 +66,16 @@
         .history-heading { align-items: center; }
         .history-heading span { text-align: right; }
         .charts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; } .chart-container { position: relative; height: 260px; }
+        .tabs { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+        .tab { margin-bottom: -1px; padding: 10px 16px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; color: var(--muted); background: transparent; font-weight: bold; cursor: pointer; }
+        .tab:hover { color: var(--ink); } .tab[aria-selected="true"] { border-color: var(--line); color: var(--ink); background: var(--panel); }
+        .tab:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+        .graphs-grid { display: grid; gap: 14px; }
         .admin-badge { align-self: center; color: var(--muted); font-size: 13px; font-weight: bold; }
         .confirm-dialog { width: min(420px, calc(100% - 32px)); padding: 28px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--panel); } .confirm-dialog::backdrop { background: rgba(62,43,32,.5); } .confirm-dialog h2 { margin-bottom: 7px; }
         .confirm-dialog label { display: block; margin: 14px 0 6px; color: var(--muted); font-size: 13px; font-weight: bold; } .confirm-dialog input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: white; }
         .confirm-error { min-height: 1.4em; margin: 12px 0 0; color: var(--red); font-size: 13px; font-weight: bold; } .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 16px; } .dialog-actions .confirm-button { border-color: var(--cyan); color: var(--panel); background: var(--cyan); font-weight: bold; }
-        @media (max-width: 800px) { header { align-items: flex-start; flex-direction: column; } .header-actions { width: 100%; } .action-button { flex: 1; } .systems-grid, .metrics, .charts-grid { grid-template-columns: 1fr; } .metric { min-height: auto; } .chart-container, .system-panel .chart-container { height: 230px; } }
+        @media (max-width: 800px) { .tab { flex: 1; padding: 10px 8px; } header { align-items: flex-start; flex-direction: column; } .header-actions { width: 100%; } .action-button { flex: 1; } .systems-grid, .metrics, .charts-grid { grid-template-columns: 1fr; } .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } #statusOverall { grid-column: 1 / -1; } .metric { min-height: auto; } .chart-container, .system-panel .chart-container { height: 230px; } }
         @media (max-width: 520px) { .telemetry-form { align-items: stretch; flex-direction: column; } }
         @media (max-width: 450px) { .app-shell { padding-top: 20px; } }
     </style>
@@ -71,6 +86,21 @@
             <div><div class="brand-mark">Standalone microgrid system</div><h1>Live operations</h1><p class="subtle">Laptop Bluetooth sends live ESP32 readings to this dashboard.</p><div class="status-line"><span id="liveStatus" class="live-status">Waiting</span><span id="lastUpdated" class="status-detail">Waiting for laptop Bluetooth bridge</span></div></div>
             <div class="header-actions"><span class="admin-badge">Signed in as admin</span><button id="signOutButton" class="action-button" type="button">Sign out</button></div>
         </header>
+        <div class="tabs" role="tablist" aria-label="Dashboard views">
+            <button id="liveTab" class="tab" type="button" role="tab" aria-selected="true" aria-controls="livePanel" data-tab="live">Live readings &amp; load</button>
+            <button id="graphsTab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="graphsPanel" data-tab="graphs" tabindex="-1">Graphs</button>
+        </div>
+        <div id="livePanel" role="tabpanel" aria-labelledby="liveTab">
+        <section class="panel status-panel" aria-labelledby="statusHeading">
+            <div class="panel-heading"><h2 id="statusHeading">System status</h2><span id="statusChecked">Not checked yet</span></div>
+            <div class="status-grid">
+                <div id="statusOverall" class="status-item"><span class="metric-label">Overall</span><strong>Waiting</strong><small>Waiting for first reading</small></div>
+                <div id="statusSolar" class="status-item"><span class="metric-label">Solar</span><strong>Unknown</strong><small>No reading yet</small></div>
+                <div id="statusBattery" class="status-item"><span class="metric-label">Battery</span><strong>Unknown</strong><small>No reading yet</small></div>
+                <div id="statusLoad" class="status-item"><span class="metric-label">Load</span><strong>Unknown</strong><small>Waiting for ESP32</small></div>
+                <div id="statusLink" class="status-item"><span class="metric-label">Connection</span><strong>Checking</strong><small>Waiting for local API</small></div>
+            </div>
+        </section>
         <section class="systems-grid" aria-label="Live solar and battery sensor readings">
             <section class="panel system-panel" aria-labelledby="solarHeading">
                 <h2 id="solarHeading">Solar</h2>
@@ -78,7 +108,6 @@
                     <article class="metric voltage"><span class="metric-label">Voltage</span><strong id="voltage" class="metric-value">--</strong><div class="metric-detail"><small>GPIO35</small><small id="voltageSource" class="metric-source">Waiting for data</small></div></article>
                     <article class="metric current"><span class="metric-label">Current</span><strong id="current" class="metric-value">--</strong><div class="metric-detail"><small>GPIO34</small><small id="currentSource" class="metric-source">Waiting for data</small></div></article>
                 </div>
-                <div class="charts-grid"><div class="chart-container"><canvas id="voltageChart"></canvas></div><div class="chart-container"><canvas id="currentChart"></canvas></div></div>
             </section>
             <section class="panel system-panel" aria-labelledby="batteryHeading">
                 <h2 id="batteryHeading">Battery</h2>
@@ -87,31 +116,41 @@
                     <article class="metric current"><span class="metric-label">Current</span><strong id="current33" class="metric-value">--</strong><div class="metric-detail"><small>GPIO33</small><small id="current33Source" class="metric-source">Waiting for data</small></div></article>
                     <article id="socCard" class="metric soc"><span class="metric-label">State of charge</span><strong id="soc" class="metric-value">--</strong><div class="soc-bar" role="progressbar" aria-label="Battery state of charge" aria-valuemin="0" aria-valuemax="100"><div id="socFill" class="soc-fill"></div></div><div class="metric-detail"><small>Coulomb counting</small><small id="socSource" class="metric-source">Waiting for data</small></div></article>
                 </div>
-                <div class="charts-grid"><div class="chart-container"><canvas id="voltage32Chart"></canvas></div><div class="chart-container"><canvas id="current33Chart"></canvas></div></div>
             </section>
         </section>
         <div id="alarm" class="alarm" role="status"><span>●</span><span>System status: waiting for reading</span></div>
         <section class="panel relay-panel" aria-labelledby="relayHeading">
-            <div class="panel-heading"><h2 id="relayHeading">Relay (GPIO25)</h2><span id="relayStatus" role="status">Relay state unknown</span></div>
-            <div class="relay-controls"><button id="relayCloseButton" class="action-button" type="button" data-relay="closed">Close relay</button><button id="relayOpenButton" class="action-button" type="button" data-relay="open">Open relay</button></div>
+            <div class="panel-heading"><h2 id="relayHeading">Load (GPIO25)</h2><span id="relayStatus" role="status">Load state unknown</span></div>
+            <div class="relay-controls"><button id="relayCloseButton" class="action-button" type="button" data-relay="closed">Connect load</button><button id="relayOpenButton" class="action-button" type="button" data-relay="open">Disconnect load</button></div>
             <p id="relayMessage" class="telemetry-status">Switching works from the dashboard opened at http://localhost:3000 on the bridge laptop and needs the admin password each time.</p>
         </section>
         <section class="panel bridge-panel" aria-labelledby="bridgeHeading">
             <div class="panel-heading"><h2 id="bridgeHeading">Laptop Bluetooth bridge</h2><span id="apiStatus">Waiting for local API</span></div>
             <p class="telemetry-status">Run <code>npm start</code> to launch the local API and have your laptop connect to Microgrid ESP32 over Bluetooth. Keep this dashboard and terminal open while collecting readings.</p>
         </section>
+        </div>
+        <div id="graphsPanel" class="graphs-grid" role="tabpanel" aria-labelledby="graphsTab" hidden>
+            <section class="panel" aria-labelledby="solarGraphsHeading">
+                <div class="panel-heading"><h2 id="solarGraphsHeading">Solar</h2><span>Last 5 minutes</span></div>
+                <div class="charts-grid"><div class="chart-container"><canvas id="voltageChart"></canvas></div><div class="chart-container"><canvas id="currentChart"></canvas></div></div>
+            </section>
+            <section class="panel" aria-labelledby="batteryGraphsHeading">
+                <div class="panel-heading"><h2 id="batteryGraphsHeading">Battery</h2><span>Last 5 minutes</span></div>
+                <div class="charts-grid"><div class="chart-container"><canvas id="voltage32Chart"></canvas></div><div class="chart-container"><canvas id="current33Chart"></canvas></div></div>
+            </section>
+        </div>
     </main>
 
     <dialog id="relayDialog" class="confirm-dialog" aria-labelledby="relayDialogHeading">
         <form id="relayConfirmForm">
-            <h2 id="relayDialogHeading">Confirm relay switch</h2>
-            <p id="relayDialogText" class="subtle">Enter the admin username and password to switch the relay.</p>
+            <h2 id="relayDialogHeading">Confirm load switch</h2>
+            <p id="relayDialogText" class="subtle">Enter the admin username and password to switch the load.</p>
             <label for="relayUsername">Username</label>
             <input id="relayUsername" autocomplete="username" required>
             <label for="relayPassword">Password</label>
             <input id="relayPassword" type="password" autocomplete="current-password" required>
             <p id="relayConfirmError" class="confirm-error" role="alert"></p>
-            <div class="dialog-actions"><button id="relayCancelButton" class="action-button" type="button">Cancel</button><button id="relayConfirmButton" class="action-button confirm-button" type="submit">Switch relay</button></div>
+            <div class="dialog-actions"><button id="relayCancelButton" class="action-button" type="button">Cancel</button><button id="relayConfirmButton" class="action-button confirm-button" type="submit">Switch load</button></div>
         </form>
     </dialog>
 
@@ -129,13 +168,96 @@
         const LIVE_FIELDS = [...SENSOR_SERIES.map(series => series.property), "soc"];
         let sensorHistory = loadSensorHistory(), charts, apiPolling = false, latestApiTimestamp = 0;
         let latestLiveReadingAt = 0;
+        // Thresholds for the system status summary. Positive battery current is taken as charging.
+        const SOLAR_MIN_VOLTAGE = 1, IDLE_CURRENT = 0.05;
+        const systemState = { reading: null, api: "waiting", relay: { requested: null, state: null } };
 
-        function goToLogin() { window.location.replace("login.html"); }
+        function setStatusItem(id, level, value, detail) {
+            const item = document.getElementById(id);
+            item.className = `status-item ${level}`;
+            item.querySelector("strong").textContent = value;
+            item.querySelector("small").textContent = detail;
+        }
+        function renderSystemStatus() {
+            const { reading, api, relay } = systemState;
+            const age = latestLiveReadingAt ? Math.max(0, Date.now() - latestLiveReadingAt) : Infinity;
+            const fresh = age <= API_STALE_AFTER_MS;
+            const problems = [], warnings = [];
+
+            if (api === "error") { setStatusItem("statusLink", "fault", "Offline", "Local API unavailable · run npm start"); problems.push("local API offline"); }
+            else if (!latestLiveReadingAt) { setStatusItem("statusLink", "warn", "No data", "API ready · waiting for BLE bridge"); warnings.push("no readings yet"); }
+            else if (!fresh) { setStatusItem("statusLink", "warn", "Delayed", `Last reading ${Math.floor(age / 1000)}s ago`); warnings.push("readings delayed"); }
+            else setStatusItem("statusLink", "ok", "Connected", "ESP32 → laptop Bluetooth → dashboard");
+
+            if (!reading) {
+                setStatusItem("statusSolar", "", "Unknown", "No reading yet");
+                setStatusItem("statusBattery", "", "Unknown", "No reading yet");
+            } else {
+                const { voltage, current, voltage32, current33, soc } = reading;
+                if (Number.isFinite(current) && Math.abs(current) > MAX_CURRENT) { setStatusItem("statusSolar", "fault", "Over-current", `${current.toPrecision(3)} A exceeds ${MAX_CURRENT} A`); problems.push("solar over-current"); }
+                else if (!Number.isFinite(voltage)) { setStatusItem("statusSolar", "warn", "No signal", "Solar voltage input unavailable"); warnings.push("solar input unavailable"); }
+                else if (voltage < SOLAR_MIN_VOLTAGE) setStatusItem("statusSolar", "ok", "Idle", `${voltage.toFixed(2)} V · no generation`);
+                else {
+                    const power = Number.isFinite(current) ? ` · ${(voltage * current).toFixed(2)} W` : "";
+                    setStatusItem("statusSolar", "ok", "Generating", `${voltage.toFixed(2)} V${power}`);
+                }
+
+                const socText = Number.isFinite(soc) ? `${soc.toFixed(1)}% SOC` : "SOC unknown";
+                const voltText = Number.isFinite(voltage32) ? `${voltage32.toFixed(2)} V · ` : "";
+                if (Number.isFinite(current33) && Math.abs(current33) > MAX_CURRENT) { setStatusItem("statusBattery", "fault", "Over-current", `${current33.toPrecision(3)} A exceeds ${MAX_CURRENT} A`); problems.push("battery over-current"); }
+                else if (Number.isFinite(soc) && soc < LOW_SOC) { setStatusItem("statusBattery", "warn", "Low charge", `${voltText}${socText}`); warnings.push("battery low"); }
+                else if (!Number.isFinite(voltage32) && !Number.isFinite(soc)) { setStatusItem("statusBattery", "warn", "No signal", "Battery inputs unavailable"); warnings.push("battery input unavailable"); }
+                else {
+                    const mode = !Number.isFinite(current33) ? "Connected" : current33 > IDLE_CURRENT ? "Charging" : current33 < -IDLE_CURRENT ? "Discharging" : "Idle";
+                    setStatusItem("statusBattery", "ok", mode, `${voltText}${socText}`);
+                }
+            }
+
+            const pending = relay.requested && relay.requested !== relay.state;
+            if (pending) { setStatusItem("statusLoad", "warn", "Switching", `Waiting for ESP32 to ${relay.requested === "open" ? "disconnect" : "connect"} load`); warnings.push("load switching"); }
+            else if (relay.state === "closed") setStatusItem("statusLoad", "ok", "Connected", "Load powered");
+            else if (relay.state === "open") setStatusItem("statusLoad", "warn", "Disconnected", "Load isolated");
+            else setStatusItem("statusLoad", "", "Unknown", "Waiting for ESP32 load state");
+
+            if (problems.length) setStatusItem("statusOverall", "fault", "Fault", problems.join(" · "));
+            else if (!latestLiveReadingAt) setStatusItem("statusOverall", "", "Waiting", "Waiting for first reading");
+            else if (warnings.length) setStatusItem("statusOverall", "warn", "Attention", warnings.join(" · "));
+            else setStatusItem("statusOverall", "ok", "Normal", "All subsystems operating normally");
+            document.getElementById("statusChecked").textContent = `Checked ${new Date().toLocaleTimeString()}`;
+        }
+
+        function goToLogin() { setSessionToken(""); window.location.replace("login.html"); }
+        if (!getSessionToken()) goToLogin();
         document.getElementById("signOutButton").addEventListener("click", async () => {
-            try { await fetch("/api/logout", { method: "POST" }); } catch (error) { console.error("Could not sign out:", error); }
+            try { await apiFetch("/api/logout", { method: "POST" }); } catch (error) { console.error("Could not sign out:", error); }
+            setSessionToken("");
             goToLogin();
         });
+        // Two views: live readings with relay control, and the graphs. The chosen tab is remembered on this device.
+        const TAB_KEY = "microgridTab";
+        const tabs = [...document.querySelectorAll("[role=tab]")];
+        function showTab(name) {
+            for (const tab of tabs) {
+                const selected = tab.dataset.tab === name;
+                tab.setAttribute("aria-selected", String(selected));
+                tab.tabIndex = selected ? 0 : -1;
+                document.getElementById(tab.getAttribute("aria-controls")).hidden = !selected;
+            }
+            // Charts drawn while hidden have no size, so redraw them once visible.
+            if (name === "graphs" && charts) Object.values(charts).forEach(chart => chart.resize());
+            try { localStorage.setItem(TAB_KEY, name); } catch {}
+        }
+        tabs.forEach((tab, index) => {
+            tab.addEventListener("click", () => showTab(tab.dataset.tab));
+            tab.addEventListener("keydown", event => {
+                if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+                const next = tabs[(index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+                showTab(next.dataset.tab);
+                next.focus();
+            });
+        });
         window.addEventListener("load", () => {
+            try { if (localStorage.getItem(TAB_KEY) === "graphs") showTab("graphs"); } catch {}
             charts = createCharts();
             updateCharts();
             loadServerHistory();
@@ -153,7 +275,7 @@
         // Fill the graphs with the readings the server kept, so a new device sees the last few minutes straight away.
         async function loadServerHistory() {
             try {
-                const response = await fetch("/api/history", { cache: "no-store" });
+                const response = await apiFetch("/api/history");
                 if (response.status === 401) return goToLogin();
                 if (!response.ok) throw new Error(`Local API returned HTTP ${response.status}`);
                 const readings = await response.json();
@@ -170,6 +292,7 @@
         function recordReading(reading, timestamp) { if (sensorHistory.some(saved => saved.timestamp === timestamp)) return updateCharts(); sensorHistory.push({ ...reading, timestamp }); sensorHistory = sensorHistory.slice(-HISTORY_LIMIT); localStorage.setItem(HISTORY_KEY, JSON.stringify(sensorHistory)); updateCharts(); }
         function updateDashboard(reading, timestamp) {
             latestLiveReadingAt = timestamp;
+            systemState.reading = reading;
             const values = [
                 { property: "voltage", unit: "V", digits: 2 },
                 { property: "current", unit: "A", digits: 4 },
@@ -202,6 +325,7 @@
             updateLiveFreshness();
         }
         function updateLiveFreshness() {
+            renderSystemStatus();
             const badge = document.getElementById("liveStatus");
             const detail = document.getElementById("lastUpdated");
             if (!latestLiveReadingAt) {
@@ -242,12 +366,14 @@
             status.classList.toggle("api-live", state === "live");
             status.classList.toggle("api-error", state === "error");
             status.classList.toggle("api-waiting", state === "waiting");
+            systemState.api = state;
+            renderSystemStatus();
         }
         async function pollApiReading() {
             if (apiPolling) return;
             apiPolling = true;
             try {
-                const response = await fetch("/api/data", { cache: "no-store" });
+                const response = await apiFetch("/api/data");
                 if (response.status === 401) return goToLogin();
                 if (response.status === 503) {
                     setApiStatus("Local API ready · waiting for laptop BLE bridge", "waiting");
@@ -286,18 +412,20 @@
             const status = document.getElementById("relayStatus");
             const pending = relay.requested && relay.requested !== relay.state;
             status.textContent = pending
-                ? `Switching relay ${relay.requested === "open" ? "open" : "closed"}…`
-                : relay.state ? `Relay ${relay.state}` : "Relay state unknown · waiting for ESP32";
+                ? `${relay.requested === "open" ? "Disconnecting" : "Connecting"} load…`
+                : relay.state ? `Load ${relay.state === "open" ? "disconnected" : "connected"}` : "Load state unknown · waiting for ESP32";
             status.classList.toggle("relay-open", !pending && relay.state === "open");
             status.classList.toggle("relay-closed", !pending && relay.state === "closed");
             document.querySelectorAll("[data-relay]").forEach(button => {
                 button.classList.toggle("active", button.dataset.relay === relay.state);
                 button.disabled = button.dataset.relay === (relay.requested || relay.state);
             });
+            systemState.relay = relay;
+            renderSystemStatus();
         }
         async function pollRelay() {
             try {
-                const response = await fetch("/api/relay", { cache: "no-store" });
+                const response = await apiFetch("/api/relay");
                 if (response.status === 401) return goToLogin();
                 if (!response.ok) throw new Error(`Local API returned HTTP ${response.status}`);
                 showRelay(await response.json());
@@ -311,9 +439,9 @@
         const relayDialog = document.getElementById("relayDialog");
         function confirmRelay(state) {
             pendingRelayState = state;
-            document.getElementById("relayDialogHeading").textContent = state === "open" ? "Open relay (disconnect)" : "Close relay (connect)";
-            document.getElementById("relayDialogText").textContent = `Enter the admin username and password to ${state === "open" ? "open the relay and disconnect" : "close the relay and connect"} the circuit.`;
-            document.getElementById("relayConfirmButton").textContent = state === "open" ? "Open relay" : "Close relay";
+            document.getElementById("relayDialogHeading").textContent = state === "open" ? "Disconnect load" : "Connect load";
+            document.getElementById("relayDialogText").textContent = `Enter the admin username and password to ${state === "open" ? "disconnect" : "connect"} the load.`;
+            document.getElementById("relayConfirmButton").textContent = state === "open" ? "Disconnect load" : "Connect load";
             document.getElementById("relayConfirmForm").reset();
             document.getElementById("relayConfirmError").textContent = "";
             relayDialog.showModal();
@@ -321,11 +449,11 @@
         }
         async function requestRelay(state, username, password) {
             const message = document.getElementById("relayMessage");
-            const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state, username, password }) });
+            const response = await apiFetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state, username, password }) });
             if (response.status === 401) return goToLogin();
             const body = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(body.error || `Local API returned HTTP ${response.status}`);
-            message.textContent = `Relay ${state} command sent · waiting for ESP32 to confirm`;
+            message.textContent = `${state === "open" ? "Disconnect" : "Connect"} load command sent · waiting for ESP32 to confirm`;
             showRelay(body);
         }
         document.getElementById("relayConfirmForm").addEventListener("submit", async event => {

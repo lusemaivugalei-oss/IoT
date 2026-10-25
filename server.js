@@ -12,6 +12,7 @@ const ESP32_INGEST_TOKEN = configuredToken.length >= 32
     ? configuredToken
     : crypto.randomBytes(32).toString("hex");
 const PUBLIC_FILES = new Set([
+    "api.js",
     "index.html",
     "iot.html",
     "login.html",
@@ -92,7 +93,7 @@ function applyCors(req, res) {
     if (req.headers.origin === DASHBOARD_ORIGIN) {
         res.setHeader("Access-Control-Allow-Origin", DASHBOARD_ORIGIN);
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, ngrok-skip-browser-warning");
     }
 }
 
@@ -152,7 +153,11 @@ function sameSecret(expectedValue, providedValue) {
     return crypto.timingSafeEqual(expected, provided);
 }
 
+// The session comes from the cookie (pages served by this server) or from a
+// bearer token (the GitHub Pages dashboard, where cross-site cookies are blocked).
 function readSessionId(req) {
+    const authorization = req.headers.authorization || "";
+    if (authorization.startsWith("Bearer ")) return authorization.slice(7);
     for (const part of (req.headers.cookie || "").split(";")) {
         const [name, ...value] = part.trim().split("=");
         if (name === SESSION_COOKIE) return value.join("=");
@@ -225,7 +230,7 @@ async function handleLogin(req, res) {
     const sessionId = crypto.randomBytes(32).toString("hex");
     sessions.set(sessionId, Date.now() + SESSION_TTL_MS);
     console.log(`Admin signed in from ${client}`);
-    return sendJson(res, 200, { signedIn: true }, {
+    return sendJson(res, 200, { signedIn: true, token: sessionId }, {
         "Set-Cookie": sessionCookie(req, sessionId, SESSION_TTL_MS / 1000)
     });
 }
@@ -387,7 +392,6 @@ async function handleRequest(req, res) {
     const relativePath = pathname === "/" ? "iot.html" : pathname.replace(/^\/+/, "");
     if (!PUBLIC_FILES.has(relativePath)) return sendText(res, 404, "Not Found");
     if (ADMIN_FILES.has(relativePath) && !isAdmin(req)) return redirect(res, "/login.html");
-    if (relativePath === "login.html" && isAdmin(req)) return redirect(res, "/");
 
     const filePath = path.resolve(ROOT, relativePath);
     fs.stat(filePath, (err, stats) => {

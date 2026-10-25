@@ -7,6 +7,7 @@
     <meta name="robots" content="noindex">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230e7490'/%3E%3Cpath d='M35 7 16 36h13l-2 21 21-31H35z' fill='white'/%3E%3C/svg%3E">
     <title>Microgrid Watch · Sign in</title>
+    <script src="api.js"></script>
     <style>
         :root { --ink: #3e2b20; --muted: #755f4b; --panel: #fffaf0; --line: #cbb596; --cyan: #8a4d2f; --red: #a63d32; }
         * { box-sizing: border-box; }
@@ -47,16 +48,20 @@
             button.disabled = true;
             error.textContent = "";
             try {
-                const response = await fetch("/api/login", {
+                const response = await apiFetch("/api/login", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ username: document.getElementById("username").value, password: document.getElementById("password").value })
                 });
                 const body = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(body.error || `Sign in failed (HTTP ${response.status})`);
-                window.location.replace("/");
+                setSessionToken(body.token);
+                window.location.replace("iot.html");
             } catch (err) {
-                error.textContent = err.message === "Failed to fetch" ? "Local API unavailable · run npm start" : err.message;
+                // fetch rejects with a TypeError when the server or tunnel cannot be reached.
+                error.textContent = err instanceof TypeError
+                    ? (API_BASE ? "Dashboard server unreachable · on the PC run npm start and npm run tunnel" : "Local API unavailable · run npm start")
+                    : err.message;
                 document.getElementById("password").value = "";
             } finally {
                 button.disabled = false;
