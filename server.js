@@ -295,12 +295,14 @@ async function readRelayBody(req, res, allowNull) {
     return body;
 }
 
-// Dashboard request to switch the relay; only from a dashboard opened on this
-// computer, and the admin must re-enter their username and password each time.
+// Dashboard request to switch the relay; only from the dashboard opened on this
+// computer or the GitHub Pages dashboard (through the tunnel), and the admin
+// must re-enter their username and password each time.
 async function handleRelayRequest(req, res) {
     const origin = req.headers.origin;
-    if (!isLocalRequest(req) || (origin && origin !== `http://${req.headers.host}`)) {
-        return sendJson(res, 403, { error: "Relay switching is allowed only from the dashboard on this computer" });
+    const fromThisComputer = isLocalRequest(req) && (!origin || origin === `http://${req.headers.host}`);
+    if (!fromThisComputer && origin !== DASHBOARD_ORIGIN) {
+        return sendJson(res, 403, { error: "Load switching is allowed only from the microgrid dashboard" });
     }
     const body = await readRelayBody(req, res, false);
     if (body === undefined) return;
