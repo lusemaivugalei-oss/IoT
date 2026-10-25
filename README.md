@@ -30,7 +30,7 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=choose-a-strong-password
 ```
 
-`ADMIN_USERNAME` defaults to `admin`. If `ADMIN_PASSWORD` is missing or shorter than 8 characters, the server generates a password at startup and prints it in the terminal. The ESP32 and Bluetooth bridge upload endpoints do not use this login.
+`ADMIN_USERNAME` defaults to `admin`. If `ADMIN_PASSWORD` is not set, the server generates a password at startup and prints it in the terminal. The ESP32 and Bluetooth bridge upload endpoints do not use this login.
 
 If Windows finds the ESP32 but the bridge reports `Unreachable`, Windows may have a stale BLE GATT cache. Stop the bridge, remove **Microgrid ESP32** in **Settings > Bluetooth & devices > Devices** if it is paired, toggle Bluetooth off and back on, power-cycle the ESP32, and restart `npm start`. Close other apps that may be connected to the ESP32 while using the bridge.
 

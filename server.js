@@ -24,7 +24,7 @@ const PUBLIC_FILES = new Set([
 const ADMIN_FILES = new Set(["index.html", "iot.html"]);
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const configuredPassword = process.env.ADMIN_PASSWORD || "";
-const ADMIN_PASSWORD = configuredPassword.length >= 8
+const ADMIN_PASSWORD = configuredPassword
     ? configuredPassword
     : crypto.randomBytes(9).toString("base64url");
 const SESSION_COOKIE = "microgrid_session";
@@ -44,8 +44,8 @@ if (!configuredToken || configuredToken.length < 32) {
     console.warn("ESP32_INGEST_TOKEN was missing or too short; using a generated local-only token. Set it explicitly to keep the token stable across restarts.");
     console.warn(`Current ingest token: ${ESP32_INGEST_TOKEN}`);
 }
-if (configuredPassword.length < 8) {
-    console.warn("ADMIN_PASSWORD was missing or shorter than 8 characters; using a generated password. Set it explicitly to keep the login stable across restarts.");
+if (!configuredPassword) {
+    console.warn("ADMIN_PASSWORD was not set; using a generated password. Set it explicitly to keep the login stable across restarts.");
     console.warn(`Admin login: ${ADMIN_USERNAME} / ${ADMIN_PASSWORD}`);
 }
 
