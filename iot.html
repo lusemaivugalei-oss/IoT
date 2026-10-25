@@ -71,6 +71,16 @@
         .tab:hover { color: var(--ink); } .tab[aria-selected="true"] { border-color: var(--line); color: var(--ink); background: var(--panel); }
         .tab:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
         .graphs-grid { display: grid; gap: 14px; }
+        .log-table-wrap { overflow-x: auto; }
+        .log-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .log-table th { padding: 8px 10px; border-bottom: 2px solid var(--line); color: var(--muted); font-size: 11px; letter-spacing: .04em; text-align: right; text-transform: uppercase; }
+        .log-table td { padding: 7px 10px; border-bottom: 1px solid #e6d8bf; text-align: right; }
+        .log-table th:first-child, .log-table td:first-child, .log-table th:last-child, .log-table td:last-child { text-align: left; }
+        .log-table tbody tr:first-child { background: rgba(138,77,47,.07); }
+        .log-files { margin: 0; padding: 0; list-style: none; }
+        .log-files li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid #e6d8bf; }
+        .log-files li:last-child { border-bottom: 0; }
+        .log-files small { display: block; color: var(--muted); font-size: 12px; }
         .admin-badge { align-self: center; color: var(--muted); font-size: 13px; font-weight: bold; }
         .confirm-dialog { width: min(420px, calc(100% - 32px)); padding: 28px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--panel); } .confirm-dialog::backdrop { background: rgba(62,43,32,.5); } .confirm-dialog h2 { margin-bottom: 7px; }
         .confirm-dialog label { display: block; margin: 14px 0 6px; color: var(--muted); font-size: 13px; font-weight: bold; } .confirm-dialog input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: white; }
@@ -89,6 +99,7 @@
         <div class="tabs" role="tablist" aria-label="Dashboard views">
             <button id="liveTab" class="tab" type="button" role="tab" aria-selected="true" aria-controls="livePanel" data-tab="live">Live readings &amp; load</button>
             <button id="graphsTab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="graphsPanel" data-tab="graphs" tabindex="-1">Graphs</button>
+            <button id="logTab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="logPanel" data-tab="log" tabindex="-1">Data log</button>
         </div>
         <div id="livePanel" role="tabpanel" aria-labelledby="liveTab">
         <section class="panel status-panel" aria-labelledby="statusHeading">
@@ -137,6 +148,16 @@
             <section class="panel" aria-labelledby="batteryGraphsHeading">
                 <div class="panel-heading"><h2 id="batteryGraphsHeading">Battery</h2><span>Last 5 minutes</span></div>
                 <div class="charts-grid"><div class="chart-container"><canvas id="voltage32Chart"></canvas></div><div class="chart-container"><canvas id="current33Chart"></canvas></div></div>
+            </section>
+        </div>
+        <div id="logPanel" class="graphs-grid" role="tabpanel" aria-labelledby="logTab" hidden>
+            <section class="panel" aria-labelledby="recentLogHeading">
+                <div class="panel-heading"><h2 id="recentLogHeading">Latest logged readings</h2><span id="logStatus">Loading…</span></div>
+                <div class="log-table-wrap"><table class="log-table"><thead><tr id="logHeader"></tr></thead><tbody id="logRows"></tbody></table></div>
+            </section>
+            <section class="panel" aria-labelledby="logFilesHeading">
+                <div class="panel-heading"><h2 id="logFilesHeading">Log files</h2><span>CSV · opens in Excel or MATLAB</span></div>
+                <ul id="logFiles" class="log-files"></ul>
             </section>
         </div>
     </main>
@@ -245,6 +266,7 @@
             }
             // Charts drawn while hidden have no size, so redraw them once visible.
             if (name === "graphs" && charts) Object.values(charts).forEach(chart => chart.resize());
+            if (name === "log") loadLogs();
             try { localStorage.setItem(TAB_KEY, name); } catch {}
         }
         tabs.forEach((tab, index) => {
@@ -257,7 +279,7 @@
             });
         });
         window.addEventListener("load", () => {
-            try { if (localStorage.getItem(TAB_KEY) === "graphs") showTab("graphs"); } catch {}
+            try { const saved = localStorage.getItem(TAB_KEY); if (saved !== "live" && tabs.some(tab => tab.dataset.tab === saved)) showTab(saved); } catch {}
             charts = createCharts();
             updateCharts();
             loadServerHistory();
@@ -266,7 +288,73 @@
             pollRelay();
             window.setInterval(pollRelay, API_POLL_INTERVAL_MS);
             window.setInterval(updateLiveFreshness, 1000);
+            window.setInterval(() => { if (!document.getElementById("logPanel").hidden) loadLogs(); }, LOG_POLL_INTERVAL_MS);
         });
+
+        // Data log tab: the newest rows the server has saved to the CSV, and the files to download.
+        const LOG_POLL_INTERVAL_MS = 3000;
+        let logsLoading = false;
+        // "Solar_Voltage_V" -> "Solar Voltage (V)"; Unix_ms is left out of the table.
+        const LOG_UNITS = { V: "V", A: "A", W: "W", pct: "%" };
+        function logColumnLabel(name) {
+            const parts = name.split("_");
+            const unit = LOG_UNITS[parts.at(-1)];
+            return unit ? `${parts.slice(0, -1).join(" ")} (${unit})` : parts.join(" ");
+        }
+        function formatBytes(bytes) { return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
+        async function loadLogs() {
+            if (logsLoading) return;
+            logsLoading = true;
+            const status = document.getElementById("logStatus");
+            try {
+                const response = await apiFetch("/api/logs");
+                if (response.status === 401) return goToLogin();
+                if (!response.ok) throw new Error(`Local API returned HTTP ${response.status}`);
+                const { file, header, rows, files } = await response.json();
+                const shown = header.map((name, index) => ({ name, index })).filter(column => column.name !== "Unix_ms");
+                document.getElementById("logHeader").replaceChildren(...shown.map(column => Object.assign(document.createElement("th"), { scope: "col", textContent: logColumnLabel(column.name) })));
+                document.getElementById("logRows").replaceChildren(...rows.map(row => {
+                    const tr = document.createElement("tr");
+                    tr.append(...shown.map(column => Object.assign(document.createElement("td"), { textContent: row[column.index] || "–" })));
+                    return tr;
+                }));
+                status.textContent = file ? `${file} · updated ${new Date().toLocaleTimeString()}` : "No readings logged yet";
+                document.getElementById("logFiles").replaceChildren(...files.map(entry => {
+                    const li = document.createElement("li");
+                    const info = document.createElement("div");
+                    info.append(Object.assign(document.createElement("strong"), { textContent: entry.name }),
+                        Object.assign(document.createElement("small"), { textContent: `${formatBytes(entry.size)} · last saved ${new Date(entry.modified).toLocaleString()}` }));
+                    const button = Object.assign(document.createElement("button"), { className: "action-button", type: "button", textContent: "Download" });
+                    button.addEventListener("click", () => downloadLog(entry.name, button));
+                    li.append(info, button);
+                    return li;
+                }));
+            } catch (error) {
+                console.error("Could not load the data log:", error);
+                status.textContent = "Data log unavailable · is npm start running?";
+            } finally {
+                logsLoading = false;
+            }
+        }
+        // Fetched with the sign-in token (a plain link would not carry it on GitHub Pages), then saved as a file.
+        async function downloadLog(name, button) {
+            button.disabled = true;
+            button.textContent = "Downloading…";
+            try {
+                const response = await apiFetch(`/api/logs/${encodeURIComponent(name)}`);
+                if (response.status === 401) return goToLogin();
+                if (!response.ok) throw new Error(`Local API returned HTTP ${response.status}`);
+                const url = URL.createObjectURL(await response.blob());
+                Object.assign(document.createElement("a"), { href: url, download: name }).click();
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+                button.textContent = "Download";
+            } catch (error) {
+                console.error("Could not download the log:", error);
+                button.textContent = "Failed · retry";
+            } finally {
+                button.disabled = false;
+            }
+        }
 
         function loadSensorHistory() { try { const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); return Array.isArray(saved) ? saved.filter(reading => Number.isFinite(reading.timestamp) && SENSOR_SERIES.some(series => Number.isFinite(reading[series.property]))).slice(-HISTORY_LIMIT) : []; } catch { return []; } }
         function hasPlottableValue(reading, property) { return Number.isFinite(reading[property]) && (!property.startsWith("current") || Math.abs(reading[property]) <= MAX_CURRENT); }

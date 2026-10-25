@@ -108,6 +108,50 @@ function logReading(reading, loadState) {
     flush();
 }
 
+// ---------- reading the logs back (for the dashboard's Data log tab) ----------
+const LOG_NAME = /^microgrid_log_\d{4}-\d{2}-\d{2}(_\d+)?\.csv$/;
+
+// The log files on the Desktop, newest first.
+function listLogFiles() {
+    let names = [];
+    try { names = fs.readdirSync(LOG_DIR).filter(name => LOG_NAME.test(name)); } catch {}
+    return names.map(name => {
+        const stats = fs.statSync(path.join(LOG_DIR, name));
+        return { name, size: stats.size, modified: stats.mtimeMs };
+    }).sort((a, b) => b.modified - a.modified);
+}
+
+// Full path of a log file, or null if the name is not one of ours.
+function logFilePath(name) {
+    return LOG_NAME.test(name) && fs.existsSync(path.join(LOG_DIR, name)) ? path.join(LOG_DIR, name) : null;
+}
+
+// Header and last rows of the file being written now. Only the end of the
+// file is read, so this stays quick however large the day's log grows.
+function recentRows(count) {
+    // Today's file as logReading() would pick it, else the newest file (e.g. just after midnight).
+    const today = logFileFor(new Date());
+    const latest = listLogFiles()[0];
+    const file = fs.existsSync(today) ? today : latest && path.join(LOG_DIR, latest.name);
+    if (!file || !fs.existsSync(file)) return { file: null, header: HEADER.split(","), rows: [] };
+    const fd = fs.openSync(file, "r");
+    try {
+        const size = fs.fstatSync(fd).size;
+        const length = Math.min(size, 256 * count + 1024);
+        const buffer = Buffer.alloc(length);
+        fs.readSync(fd, buffer, 0, length, size - length);
+        const lines = buffer.toString("utf8").split(/\r?\n/).filter(Boolean);
+        if (length < size) lines.shift();  // first line may be cut in half
+        const firstLine = Buffer.alloc(Math.min(size, 512));
+        fs.readSync(fd, firstLine, 0, firstLine.length, 0);
+        const header = firstLine.toString("utf8").split(/\r?\n/, 1)[0];
+        const rows = lines.filter(line => line !== header).slice(-count).reverse().map(line => line.split(","));
+        return { file: path.basename(file), header: header.split(","), rows };
+    } finally {
+        fs.closeSync(fd);
+    }
+}
+
 // Retry rows held back while the file was open in Excel, and print a
 // summary every 5 minutes.
 setInterval(flush, 5000).unref();
@@ -115,4 +159,4 @@ setInterval(() => { if (rowsWritten) console.log(`Logger: ${rowsWritten} rows sa
 process.on("exit", flush);
 
 console.log(`Logger: every reading is saved to ${LOG_DIR}`);
-module.exports = { logReading };
+module.exports = { logReading, listLogFiles, logFilePath, recentRows };

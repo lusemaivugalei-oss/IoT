@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { URL } = require("node:url");
-const { logReading } = require("./logger");
+const { logReading, listLogFiles, logFilePath, recentRows } = require("./logger");
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
@@ -369,8 +369,27 @@ async function handleRequest(req, res) {
     }
     // The BLE bridge on this PC polls the requested relay state without a login.
     const bridgeRelayPoll = pathname === "/api/relay" && req.method === "GET" && isLocalRequest(req) && !req.headers.origin;
-    if (["/api/relay", "/api/data", "/api/history"].includes(pathname) && !isAdmin(req) && !bridgeRelayPoll) {
+    const adminApi = ["/api/relay", "/api/data", "/api/history", "/api/logs"].includes(pathname) || pathname.startsWith("/api/logs/");
+    if (adminApi && !isAdmin(req) && !bridgeRelayPoll) {
         return sendJson(res, 401, { error: "Sign in as admin to view the dashboard" });
+    }
+    // Data log tab: the newest logged rows and the list of CSV files.
+    if (pathname === "/api/logs") {
+        if (req.method !== "GET") return sendText(res, 405, "Method Not Allowed");
+        return sendJson(res, 200, { ...recentRows(20), files: listLogFiles() });
+    }
+    // Download one CSV log file.
+    if (pathname.startsWith("/api/logs/")) {
+        if (req.method !== "GET") return sendText(res, 405, "Method Not Allowed");
+        const name = pathname.slice("/api/logs/".length);
+        const file = logFilePath(name);
+        if (!file) return sendText(res, 404, "Log file not found");
+        res.writeHead(200, {
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": `attachment; filename="${name}"`,
+            "Cache-Control": "no-store"
+        });
+        return fs.createReadStream(file).pipe(res);
     }
     if (pathname === "/api/relay") {
         if (req.method === "GET") return sendJson(res, 200, relay);
