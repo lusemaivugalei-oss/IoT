@@ -113,6 +113,17 @@ function isLoopbackAddress(address) {
         address?.startsWith("::ffff:127.");
 }
 
+// True only for a browser on this PC talking to the server directly. Tunnels
+// such as ngrok connect from 127.0.0.1 too, so forwarded requests and
+// non-localhost Host names are rejected as well.
+function isLocalRequest(req) {
+    if (!isLoopbackAddress(req.socket.remoteAddress)) return false;
+    if (req.headers["x-forwarded-for"] || req.headers["x-forwarded-host"] ||
+        req.headers.forwarded || req.headers["x-real-ip"]) return false;
+    const hostname = (req.headers.host || "").replace(/:\d+$/, "").toLowerCase();
+    return ["localhost", "127.0.0.1", "[::1]"].includes(hostname);
+}
+
 function validIngestToken(req) {
     const authorization = req.headers.authorization || "";
     const providedToken = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
@@ -312,6 +323,13 @@ async function handleRequest(req, res) {
         }
         return req.method === "POST" ? storeReading(req, res) : sendText(res, 405, "Method Not Allowed");
     }
+    const relativePath = pathname === "/" ? "iot.html" : pathname.replace(/^\/+/, "");
+    const dashboardOnly = ["/api/login", "/api/logout", "/api/relay", "/api/data"].includes(pathname) ||
+        ADMIN_FILES.has(relativePath) || relativePath === "login.html";
+    if (dashboardOnly && !isLocalRequest(req)) {
+        console.warn(`Blocked dashboard request from outside this PC: ${req.method} ${pathname}`);
+        return sendText(res, 403, "The Microgrid Watch dashboard can only be opened on this PC at http://localhost:3000");
+    }
     if (pathname === "/api/login") {
         return req.method === "POST" ? handleLogin(req, res) : sendText(res, 405, "Method Not Allowed");
     }
@@ -337,7 +355,6 @@ async function handleRequest(req, res) {
         return sendText(res, 405, "Method Not Allowed");
     }
 
-    const relativePath = pathname === "/" ? "iot.html" : pathname.replace(/^\/+/, "");
     if (!PUBLIC_FILES.has(relativePath)) return sendText(res, 404, "Not Found");
     if (ADMIN_FILES.has(relativePath) && !isAdmin(req)) return redirect(res, "/login.html");
     if (relativePath === "login.html" && isAdmin(req)) return redirect(res, "/");
