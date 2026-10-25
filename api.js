@@ -1,6 +1,7 @@
 // Shared by the dashboard and sign-in pages. GitHub Pages only hosts the page,
 // so there the API calls go to this PC's server through the Cloudflare tunnel
-// (npm run tunnel). Its free address changes on every restart, so update it here.
+// (npm run tunnel). Its free address changes on every restart; tunnel.js
+// rewrites the line below and pushes it to GitHub automatically.
 const TUNNEL_API = "https://deposits-oscar-copies-dont.trycloudflare.com";
 const API_BASE = location.hostname.endsWith("github.io") ? TUNNEL_API : "";
 const SESSION_KEY = "microgridSession";
