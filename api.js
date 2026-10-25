@@ -2,7 +2,7 @@
 // so there the API calls go to this PC's server through the Cloudflare tunnel
 // (npm run tunnel). Its free address changes on every restart; tunnel.js
 // rewrites the line below and pushes it to GitHub automatically.
-const TUNNEL_API = "https://brad-emission-favorites-chubby.trycloudflare.com";
+const TUNNEL_API = "https://downloaded-greetings-deutschland-crimes.trycloudflare.com";
 const API_BASE = location.hostname.endsWith("github.io") ? TUNNEL_API : "";
 const SESSION_KEY = "microgridSession";
 
