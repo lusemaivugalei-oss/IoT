@@ -36,6 +36,10 @@ const sessions = new Map();
 // client address -> { failures, lockedUntil }
 const loginAttempts = new Map();
 let latestReading;
+// Recent readings so any device sees full graphs as soon as it opens the dashboard.
+const HISTORY_WINDOW_MS = 5 * 60 * 1000;
+const HISTORY_LIMIT = 300;
+let readingHistory = [];
 // requested: what the dashboard asked for; state: what the ESP32 last reported (null = unknown)
 const RELAY_STATES = ["open", "closed"];
 const relay = { requested: null, state: null };
@@ -113,7 +117,7 @@ function isLoopbackAddress(address) {
         address?.startsWith("::ffff:127.");
 }
 
-// True only for a browser on this PC talking to the server directly. Tunnels
+// True only for a program on this PC talking to the server directly. Tunnels
 // such as ngrok connect from 127.0.0.1 too, so forwarded requests and
 // non-localhost Host names are rejected as well.
 function isLocalRequest(req) {
@@ -122,6 +126,15 @@ function isLocalRequest(req) {
         req.headers.forwarded || req.headers["x-real-ip"]) return false;
     const hostname = (req.headers.host || "").replace(/:\d+$/, "").toLowerCase();
     return ["localhost", "127.0.0.1", "[::1]"].includes(hostname);
+}
+
+// Address used for login lockouts. Behind ngrok every request comes from
+// 127.0.0.1, so use the visitor address the tunnel appends instead.
+function clientAddress(req) {
+    const address = req.socket.remoteAddress || "unknown";
+    const forwardedFor = req.headers["x-forwarded-for"];
+    if (!isLoopbackAddress(address) || !forwardedFor) return address;
+    return String(forwardedFor).split(",").pop().trim() || address;
 }
 
 function validIngestToken(req) {
@@ -168,13 +181,33 @@ function redirect(res, location) {
     res.end();
 }
 
-async function handleLogin(req, res) {
-    const client = req.socket.remoteAddress || "unknown";
+// Checks the admin username and password in a request body, counting failures
+// towards the lockout. Returns null when they match, otherwise the error to send.
+function credentialFailure(req, body, purpose) {
+    const client = clientAddress(req);
     const attempt = loginAttempts.get(client) || { failures: 0, lockedUntil: 0 };
     if (attempt.lockedUntil > Date.now()) {
         const wait = Math.ceil((attempt.lockedUntil - Date.now()) / 1000);
-        return sendJson(res, 429, { error: `Too many failed attempts. Try again in ${wait}s.` });
+        return { status: 429, error: `Too many failed attempts. Try again in ${wait}s.` };
     }
+    const usernameOk = sameSecret(ADMIN_USERNAME, body?.username ?? "");
+    const passwordOk = sameSecret(ADMIN_PASSWORD, body?.password ?? "");
+    if (!usernameOk || !passwordOk) {
+        attempt.failures += 1;
+        if (attempt.failures >= LOGIN_MAX_FAILURES) {
+            attempt.failures = 0;
+            attempt.lockedUntil = Date.now() + LOGIN_LOCKOUT_MS;
+        }
+        loginAttempts.set(client, attempt);
+        console.warn(`Failed admin ${purpose} from ${client}`);
+        return { status: 401, error: "Incorrect username or password" };
+    }
+    loginAttempts.delete(client);
+    return null;
+}
+
+async function handleLogin(req, res) {
+    const client = clientAddress(req);
     if (!req.headers["content-type"]?.startsWith("application/json")) {
         return sendText(res, 415, "Expected application/json");
     }
@@ -185,20 +218,9 @@ async function handleLogin(req, res) {
         return sendText(res, error.statusCode || 400, "Invalid login request");
     }
 
-    const usernameOk = sameSecret(ADMIN_USERNAME, body?.username ?? "");
-    const passwordOk = sameSecret(ADMIN_PASSWORD, body?.password ?? "");
-    if (!usernameOk || !passwordOk) {
-        attempt.failures += 1;
-        if (attempt.failures >= LOGIN_MAX_FAILURES) {
-            attempt.failures = 0;
-            attempt.lockedUntil = Date.now() + LOGIN_LOCKOUT_MS;
-        }
-        loginAttempts.set(client, attempt);
-        console.warn(`Failed admin login from ${client}`);
-        return sendJson(res, 401, { error: "Incorrect username or password" });
-    }
+    const failure = credentialFailure(req, body, "login");
+    if (failure) return sendJson(res, failure.status, { error: failure.error });
 
-    loginAttempts.delete(client);
     for (const [id, expiresAt] of sessions) if (expiresAt < Date.now()) sessions.delete(id);
     const sessionId = crypto.randomBytes(32).toString("hex");
     sessions.set(sessionId, Date.now() + SESSION_TTL_MS);
@@ -243,6 +265,9 @@ async function storeReading(req, res) {
         soc: Number.isFinite(reading.soc) ? reading.soc : null,
         timestamp: Date.now()
     };
+    readingHistory.push(latestReading);
+    const oldest = latestReading.timestamp - HISTORY_WINDOW_MS;
+    readingHistory = readingHistory.filter(entry => entry.timestamp >= oldest).slice(-HISTORY_LIMIT);
     return sendJson(res, 200, { accepted: true });
 }
 
@@ -262,18 +287,22 @@ async function readRelayBody(req, res, allowNull) {
         sendJson(res, 400, { error: 'state must be "open" or "closed"' });
         return undefined;
     }
-    return body.state;
+    return body;
 }
 
-// Dashboard request to switch the relay; only from a dashboard opened on this computer.
+// Dashboard request to switch the relay; only from a dashboard opened on this
+// computer, and the admin must re-enter their username and password each time.
 async function handleRelayRequest(req, res) {
     const origin = req.headers.origin;
-    if (!isLoopbackAddress(req.socket.remoteAddress) ||
-        (origin && origin !== `http://${req.headers.host}`)) {
+    if (!isLocalRequest(req) || (origin && origin !== `http://${req.headers.host}`)) {
         return sendJson(res, 403, { error: "Relay switching is allowed only from the dashboard on this computer" });
     }
-    const state = await readRelayBody(req, res, false);
-    if (state === undefined) return;
+    const body = await readRelayBody(req, res, false);
+    if (body === undefined) return;
+    const failure = credentialFailure(req, body, "relay confirmation");
+    // 403 rather than 401 so the dashboard keeps the session and lets the admin retry.
+    if (failure) return sendJson(res, failure.status === 401 ? 403 : failure.status, { error: failure.error });
+    const { state } = body;
     relay.requested = state;
     console.log(`Dashboard requested relay ${state}`);
     return sendJson(res, 200, relay);
@@ -281,12 +310,12 @@ async function handleRelayRequest(req, res) {
 
 // BLE bridge report of the relay state confirmed by the ESP32.
 async function handleRelayState(req, res) {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    if (!isLocalRequest(req)) {
         return sendJson(res, 403, { error: "Bluetooth bridge uploads are allowed only from this computer" });
     }
-    const state = await readRelayBody(req, res, true);
-    if (state === undefined) return;
-    relay.state = state;
+    const body = await readRelayBody(req, res, true);
+    if (body === undefined) return;
+    relay.state = body.state;
     return sendJson(res, 200, relay);
 }
 
@@ -318,17 +347,10 @@ async function handleRequest(req, res) {
         return req.method === "POST" ? handleIngest(req, res) : sendText(res, 405, "Method Not Allowed");
     }
     if (pathname === "/api/ble-ingest") {
-        if (!isLoopbackAddress(req.socket.remoteAddress)) {
+        if (!isLocalRequest(req)) {
             return sendJson(res, 403, { error: "Bluetooth bridge uploads are allowed only from this computer" });
         }
         return req.method === "POST" ? storeReading(req, res) : sendText(res, 405, "Method Not Allowed");
-    }
-    const relativePath = pathname === "/" ? "iot.html" : pathname.replace(/^\/+/, "");
-    const dashboardOnly = ["/api/login", "/api/logout", "/api/relay", "/api/data"].includes(pathname) ||
-        ADMIN_FILES.has(relativePath) || relativePath === "login.html";
-    if (dashboardOnly && !isLocalRequest(req)) {
-        console.warn(`Blocked dashboard request from outside this PC: ${req.method} ${pathname}`);
-        return sendText(res, 403, "The Microgrid Watch dashboard can only be opened on this PC at http://localhost:3000");
     }
     if (pathname === "/api/login") {
         return req.method === "POST" ? handleLogin(req, res) : sendText(res, 405, "Method Not Allowed");
@@ -336,7 +358,9 @@ async function handleRequest(req, res) {
     if (pathname === "/api/logout") {
         return req.method === "POST" ? handleLogout(req, res) : sendText(res, 405, "Method Not Allowed");
     }
-    if ((pathname === "/api/relay" || pathname === "/api/data") && !isAdmin(req)) {
+    // The BLE bridge on this PC polls the requested relay state without a login.
+    const bridgeRelayPoll = pathname === "/api/relay" && req.method === "GET" && isLocalRequest(req) && !req.headers.origin;
+    if (["/api/relay", "/api/data", "/api/history"].includes(pathname) && !isAdmin(req) && !bridgeRelayPoll) {
         return sendJson(res, 401, { error: "Sign in as admin to view the dashboard" });
     }
     if (pathname === "/api/relay") {
@@ -345,6 +369,11 @@ async function handleRequest(req, res) {
     }
     if (pathname === "/api/relay-state") {
         return req.method === "POST" ? handleRelayState(req, res) : sendText(res, 405, "Method Not Allowed");
+    }
+    if (pathname === "/api/history") {
+        if (req.method !== "GET") return sendText(res, 405, "Method Not Allowed");
+        const oldest = Date.now() - HISTORY_WINDOW_MS;
+        return sendJson(res, 200, readingHistory.filter(entry => entry.timestamp >= oldest));
     }
     if (pathname === "/api/data") {
         if (req.method !== "GET") return sendText(res, 405, "Method Not Allowed");
@@ -355,6 +384,7 @@ async function handleRequest(req, res) {
         return sendText(res, 405, "Method Not Allowed");
     }
 
+    const relativePath = pathname === "/" ? "iot.html" : pathname.replace(/^\/+/, "");
     if (!PUBLIC_FILES.has(relativePath)) return sendText(res, 404, "Not Found");
     if (ADMIN_FILES.has(relativePath) && !isAdmin(req)) return redirect(res, "/login.html");
     if (relativePath === "login.html" && isAdmin(req)) return redirect(res, "/");

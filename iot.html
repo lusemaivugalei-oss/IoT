@@ -57,6 +57,9 @@
         .history-heading span { text-align: right; }
         .charts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; } .chart-container { position: relative; height: 260px; }
         .admin-badge { align-self: center; color: var(--muted); font-size: 13px; font-weight: bold; }
+        .confirm-dialog { width: min(420px, calc(100% - 32px)); padding: 28px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--panel); } .confirm-dialog::backdrop { background: rgba(62,43,32,.5); } .confirm-dialog h2 { margin-bottom: 7px; }
+        .confirm-dialog label { display: block; margin: 14px 0 6px; color: var(--muted); font-size: 13px; font-weight: bold; } .confirm-dialog input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: white; }
+        .confirm-error { min-height: 1.4em; margin: 12px 0 0; color: var(--red); font-size: 13px; font-weight: bold; } .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 16px; } .dialog-actions .confirm-button { border-color: var(--cyan); color: var(--panel); background: var(--cyan); font-weight: bold; }
         @media (max-width: 800px) { header { align-items: flex-start; flex-direction: column; } .header-actions { width: 100%; } .action-button { flex: 1; } .systems-grid, .metrics, .charts-grid { grid-template-columns: 1fr; } .metric { min-height: auto; } .chart-container, .system-panel .chart-container { height: 230px; } }
         @media (max-width: 520px) { .telemetry-form { align-items: stretch; flex-direction: column; } }
         @media (max-width: 450px) { .app-shell { padding-top: 20px; } }
@@ -91,13 +94,26 @@
         <section class="panel relay-panel" aria-labelledby="relayHeading">
             <div class="panel-heading"><h2 id="relayHeading">Relay (GPIO25)</h2><span id="relayStatus" role="status">Relay state unknown</span></div>
             <div class="relay-controls"><button id="relayCloseButton" class="action-button" type="button" data-relay="closed">Close relay</button><button id="relayOpenButton" class="action-button" type="button" data-relay="open">Open relay</button></div>
-            <p id="relayMessage" class="telemetry-status">Switching works from the dashboard opened at http://localhost:3000 on the bridge laptop.</p>
+            <p id="relayMessage" class="telemetry-status">Switching works from the dashboard opened at http://localhost:3000 on the bridge laptop and needs the admin password each time.</p>
         </section>
         <section class="panel bridge-panel" aria-labelledby="bridgeHeading">
             <div class="panel-heading"><h2 id="bridgeHeading">Laptop Bluetooth bridge</h2><span id="apiStatus">Waiting for local API</span></div>
             <p class="telemetry-status">Run <code>npm start</code> to launch the local API and have your laptop connect to Microgrid ESP32 over Bluetooth. Keep this dashboard and terminal open while collecting readings.</p>
         </section>
     </main>
+
+    <dialog id="relayDialog" class="confirm-dialog" aria-labelledby="relayDialogHeading">
+        <form id="relayConfirmForm">
+            <h2 id="relayDialogHeading">Confirm relay switch</h2>
+            <p id="relayDialogText" class="subtle">Enter the admin username and password to switch the relay.</p>
+            <label for="relayUsername">Username</label>
+            <input id="relayUsername" autocomplete="username" required>
+            <label for="relayPassword">Password</label>
+            <input id="relayPassword" type="password" autocomplete="current-password" required>
+            <p id="relayConfirmError" class="confirm-error" role="alert"></p>
+            <div class="dialog-actions"><button id="relayCancelButton" class="action-button" type="button">Cancel</button><button id="relayConfirmButton" class="action-button confirm-button" type="submit">Switch relay</button></div>
+        </form>
+    </dialog>
 
     <audio id="alarmSound"><source src="alarm.mp3" type="audio/mpeg"></audio>
     <script>
@@ -122,6 +138,7 @@
         window.addEventListener("load", () => {
             charts = createCharts();
             updateCharts();
+            loadServerHistory();
             pollApiReading();
             window.setInterval(pollApiReading, API_POLL_INTERVAL_MS);
             pollRelay();
@@ -133,7 +150,24 @@
         function hasPlottableValue(reading, property) { return Number.isFinite(reading[property]) && (!property.startsWith("current") || Math.abs(reading[property]) <= MAX_CURRENT); }
         function createCharts() { const now = Date.now(); return Object.fromEntries(SENSOR_SERIES.map(series => [series.property, new Chart(document.getElementById(series.canvas), { type: "line", data: { datasets: [{ label: `${series.label} (${series.unit})`, data: sensorHistory.filter(reading => hasPlottableValue(reading, series.property)).map(reading => ({ x: reading.timestamp, y: reading[series.property] })), borderColor: series.color, backgroundColor: series.color, tension: .25, pointRadius: 3, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { type: "linear", min: now - HISTORY_WINDOW_MS, max: now, ticks: { color: "#755f4b", callback: value => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }, grid: { color: "#d8c8ae" } }, y: { beginAtZero: !series.property.startsWith("current"), ticks: { color: "#755f4b", callback: value => series.property.startsWith("current") ? Number(value).toPrecision(3) : value }, grid: { color: "#d8c8ae" } } }, plugins: { legend: { labels: { color: "#3e2b20" } } } } })])); }
         function updateCharts() { const now = Date.now(); Object.entries(charts).forEach(([property, chart]) => { chart.data.datasets[0].data = sensorHistory.filter(reading => hasPlottableValue(reading, property)).map(reading => ({ x: reading.timestamp, y: reading[property] })); chart.options.scales.x.min = now - HISTORY_WINDOW_MS; chart.options.scales.x.max = now; chart.update("none"); }); }
-        function recordReading(reading, timestamp) { sensorHistory.push({ ...reading, timestamp }); sensorHistory = sensorHistory.slice(-HISTORY_LIMIT); localStorage.setItem(HISTORY_KEY, JSON.stringify(sensorHistory)); updateCharts(); }
+        // Fill the graphs with the readings the server kept, so a new device sees the last few minutes straight away.
+        async function loadServerHistory() {
+            try {
+                const response = await fetch("/api/history", { cache: "no-store" });
+                if (response.status === 401) return goToLogin();
+                if (!response.ok) throw new Error(`Local API returned HTTP ${response.status}`);
+                const readings = await response.json();
+                if (!Array.isArray(readings)) throw new Error("Local API returned invalid history");
+                const byTimestamp = new Map(sensorHistory.map(reading => [reading.timestamp, reading]));
+                for (const reading of readings) if (Number.isFinite(reading?.timestamp)) byTimestamp.set(reading.timestamp, reading);
+                sensorHistory = [...byTimestamp.values()].sort((a, b) => a.timestamp - b.timestamp).slice(-HISTORY_LIMIT);
+                localStorage.setItem(HISTORY_KEY, JSON.stringify(sensorHistory));
+                updateCharts();
+            } catch (error) {
+                console.error("Could not load reading history:", error);
+            }
+        }
+        function recordReading(reading, timestamp) { if (sensorHistory.some(saved => saved.timestamp === timestamp)) return updateCharts(); sensorHistory.push({ ...reading, timestamp }); sensorHistory = sensorHistory.slice(-HISTORY_LIMIT); localStorage.setItem(HISTORY_KEY, JSON.stringify(sensorHistory)); updateCharts(); }
         function updateDashboard(reading, timestamp) {
             latestLiveReadingAt = timestamp;
             const values = [
@@ -272,20 +306,47 @@
                 showRelay({ requested: null, state: null });
             }
         }
-        async function requestRelay(state) {
-            const message = document.getElementById("relayMessage");
-            try {
-                const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state }) });
-                if (response.status === 401) return goToLogin();
-                const body = await response.json().catch(() => ({}));
-                if (!response.ok) throw new Error(body.error || `Local API returned HTTP ${response.status}`);
-                message.textContent = `Relay ${state} command sent · waiting for ESP32 to confirm`;
-                showRelay(body);
-            } catch (error) {
-                message.textContent = `Could not switch relay: ${error.message}`;
-            }
+        // Every relay switch asks for the admin username and password again.
+        let pendingRelayState = null;
+        const relayDialog = document.getElementById("relayDialog");
+        function confirmRelay(state) {
+            pendingRelayState = state;
+            document.getElementById("relayDialogHeading").textContent = state === "open" ? "Open relay (disconnect)" : "Close relay (connect)";
+            document.getElementById("relayDialogText").textContent = `Enter the admin username and password to ${state === "open" ? "open the relay and disconnect" : "close the relay and connect"} the circuit.`;
+            document.getElementById("relayConfirmButton").textContent = state === "open" ? "Open relay" : "Close relay";
+            document.getElementById("relayConfirmForm").reset();
+            document.getElementById("relayConfirmError").textContent = "";
+            relayDialog.showModal();
+            document.getElementById("relayUsername").focus();
         }
-        document.querySelectorAll("[data-relay]").forEach(button => button.addEventListener("click", () => requestRelay(button.dataset.relay)));
+        async function requestRelay(state, username, password) {
+            const message = document.getElementById("relayMessage");
+            const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state, username, password }) });
+            if (response.status === 401) return goToLogin();
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(body.error || `Local API returned HTTP ${response.status}`);
+            message.textContent = `Relay ${state} command sent · waiting for ESP32 to confirm`;
+            showRelay(body);
+        }
+        document.getElementById("relayConfirmForm").addEventListener("submit", async event => {
+            event.preventDefault();
+            const button = document.getElementById("relayConfirmButton");
+            const error = document.getElementById("relayConfirmError");
+            button.disabled = true;
+            error.textContent = "";
+            try {
+                await requestRelay(pendingRelayState, document.getElementById("relayUsername").value, document.getElementById("relayPassword").value);
+                relayDialog.close();
+            } catch (err) {
+                error.textContent = err.message === "Failed to fetch" ? "Local API unavailable · run npm start" : err.message;
+                document.getElementById("relayPassword").value = "";
+            } finally {
+                button.disabled = false;
+            }
+        });
+        document.getElementById("relayCancelButton").addEventListener("click", () => relayDialog.close());
+        relayDialog.addEventListener("close", () => { pendingRelayState = null; document.getElementById("relayPassword").value = ""; });
+        document.querySelectorAll("[data-relay]").forEach(button => button.addEventListener("click", () => confirmRelay(button.dataset.relay)));
         // Remove the old install-app service worker so it cannot serve a cached dashboard.
         if ("serviceWorker" in navigator) navigator.serviceWorker.getRegistrations().then(registrations => registrations.forEach(registration => registration.unregister())).catch(() => {});
     </script>

@@ -19,8 +19,6 @@ Microgrid Watch reads two ESP32 voltage and two current inputs using laptop Blue
 
 ## Admin login
 
-The dashboard, sign-in page, and data/relay APIs open only on this PC at `http://localhost:3000`. Requests from other devices on the network or through a tunnel such as ngrok get `403`, even with a valid login.
-
 The dashboard has a single admin account. Opening it redirects to the sign-in page, and the **Sign out** button in the header ends the session. Sessions last 12 hours, and five wrong passwords lock that address out for one minute.
 
 Set the credentials in a `.env` file in the dashboard folder (it is git-ignored), then restart `npm start`:
@@ -31,6 +29,20 @@ ADMIN_PASSWORD=choose-a-strong-password
 ```
 
 `ADMIN_USERNAME` defaults to `admin`. If `ADMIN_PASSWORD` is not set, the server generates a password at startup and prints it in the terminal. The ESP32 and Bluetooth bridge upload endpoints do not use this login.
+
+### Open the dashboard from another device or Wi-Fi
+
+Keep `npm start` running, then in a second terminal run:
+
+```powershell
+npm run tunnel
+```
+
+On the other device, open `https://pasty-tiptoeing-excretory.ngrok-free.dev` and sign in as the admin. ngrok may first show a "You are about to visit" page; choose **Visit Site**. Without the admin login, visitors only see the sign-in page.
+
+Through the tunnel the admin can view live readings, graphs, and the relay state. The server keeps the last 5 minutes of readings in memory, so the graphs are already filled when a new device opens the dashboard; this history clears when the server restarts. Switching the relay, and the Bluetooth bridge uploads, still work only on this PC.
+
+Every relay switch, open (disconnect) or close (connect), asks for the admin username and password again before the command is sent. Wrong passwords count towards the same one-minute lockout as the sign-in page.
 
 If Windows finds the ESP32 but the bridge reports `Unreachable`, Windows may have a stale BLE GATT cache. Stop the bridge, remove **Microgrid ESP32** in **Settings > Bluetooth & devices > Devices** if it is paired, toggle Bluetooth off and back on, power-cycle the ESP32, and restart `npm start`. Close other apps that may be connected to the ESP32 while using the bridge.
 
