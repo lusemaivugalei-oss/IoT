@@ -1,17 +1,11 @@
-const CACHE_NAME = "microgrid-watch-v7";
-const APP_FILES = ["./iot.html", "./manifest.webmanifest"];
-
-self.addEventListener("install", event => {
-    event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_FILES)));
-    self.skipWaiting();
-});
+// The dashboard is no longer an installable app. This worker only removes
+// caches left by earlier versions and then unregisters itself.
+self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("activate", event => {
-    event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)))));
-    self.clients.claim();
-});
-
-self.addEventListener("fetch", event => {
-    if (event.request.method !== "GET") return;
-    event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
+    event.waitUntil((async () => {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(key => caches.delete(key)));
+        await self.registration.unregister();
+    })());
 });

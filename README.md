@@ -1,18 +1,55 @@
 # Microgrid Watch
 
-The GitHub Pages dashboard reads voltage and current directly from the ESP32 over Bluetooth Low Energy (BLE). It does not need a Wi-Fi connection, cloud API, login, or credentials.
+Microgrid Watch reads two ESP32 voltage and two current inputs using laptop Bluetooth Low Energy (BLE). A laptop-side bridge forwards readings to the local Node API; the dashboard polls that API for four live cards and graphs.
 
-## Connect the ESP32 to the dashboard
+## Run the local dashboard and laptop Bluetooth bridge
 
-1. In Arduino IDE, create a sketch, copy the contents of [`Bluetooth.cpp`](./Bluetooth.cpp) into its `.ino` file, select your ESP32 board and port, then upload. The BLE libraries are included with the ESP32 Arduino core.
-2. Power the ESP32 and open [the dashboard](https://lusemaivugalei-oss.github.io/IoT/iot.html) on the PC in Chrome or Edge. Web Bluetooth requires a supported browser and a secure HTTPS page.
-3. The first time, click **Connect Bluetooth**, choose **Microgrid ESP32** in the browser's device picker, and approve the connection. This one-time browser permission is required; a website cannot silently pair with a new Bluetooth device.
-4. The dashboard receives voltage/current notifications roughly 1.5 times per second and plots them in the browser. After the first approval, it reconnects automatically when reopened and retries while the authorized ESP32 is powered on and in range. Click **Disconnect Bluetooth** to end the connection.
+1. Install Node.js and Python 3. Make sure Bluetooth is enabled on the laptop.
+2. In PowerShell, go to the dashboard folder, install the BLE bridge dependency, and start the app:
 
-The BLE service UUID is `19b10000-e8f2-537e-4f6c-d104768a1214`; its read/notify characteristic UUID is `19b10001-e8f2-537e-4f6c-d104768a1214`. The characteristic sends voltage and current as two little-endian 32-bit floats, fitting within the default BLE MTU.
+   ```powershell
+   cd "C:\Users\user\OneDrive\Desktop\EE499\IoT"
+   python -m pip install -r requirements-ble.txt
+   npm start
+   ```
 
-The connection is direct from the PC browser to the ESP32. Each PC that needs readings must connect to the ESP32 over BLE; GitHub Pages does not relay sensor data.
+   The two named processes should report the local API and the BLE scan. Keep this terminal open.
+3. Power the ESP32 and open `http://localhost:3000` in your browser. The laptop bridge scans for **Microgrid ESP32**, connects using the BLE service, subscribes to its readings, and forwards each packet to the local API. It retries scanning and reconnects automatically.
+4. Watch the dashboard for **Laptop Bluetooth bridge connected** and all four live sensor readings. The dashboard polls the local API once per second and saves received points to its browser history.
+
+## Admin login
+
+The dashboard has a single admin account. Opening it redirects to the sign-in page, and the **Sign out** button in the header ends the session. Sessions last 12 hours, and five wrong passwords lock that address out for one minute.
+
+Set the credentials in a `.env` file in the dashboard folder (it is git-ignored), then restart `npm start`:
+
+```
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=choose-a-strong-password
+```
+
+`ADMIN_USERNAME` defaults to `admin`. If `ADMIN_PASSWORD` is missing or shorter than 8 characters, the server generates a password at startup and prints it in the terminal. The ESP32 and Bluetooth bridge upload endpoints do not use this login.
+
+If Windows finds the ESP32 but the bridge reports `Unreachable`, Windows may have a stale BLE GATT cache. Stop the bridge, remove **Microgrid ESP32** in **Settings > Bluetooth & devices > Devices** if it is paired, toggle Bluetooth off and back on, power-cycle the ESP32, and restart `npm start`. Close other apps that may be connected to the ESP32 while using the bridge.
+
+The BLE service UUID is `19b10000-e8f2-537e-4f6c-d104768a1214`; its reading characteristic UUID is `19b10001-e8f2-537e-4f6c-d104768a1214`. Each notification contains four little-endian 32-bit floats in dashboard field order: solar voltage (GPIO32), solar current (GPIO33), battery voltage (GPIO35), battery current (GPIO34). The bridge accepts the previous two-float packet during firmware upgrades. Its API upload endpoint accepts connections only from the same laptop. No Render service, ESP32 Wi-Fi credentials, browser Bluetooth permission, or ingest token is required for this BLE path.
+
+For direct ESP32-to-browser BLE, the dashboard no longer opens its own browser Bluetooth connection. Run the laptop bridge with `npm start` so one local process owns the BLE connection and forwards data to the dashboard.
+
+## Send Wi-Fi telemetry to the dashboard
+
+GitHub Pages is static hosting and cannot access this laptop’s local API. For the laptop bridge flow, use `http://localhost:3000`.
+
+The firmware uploads every five seconds and the dashboard polls every second. An available voltage can be uploaded while current is unavailable; missing sensor values use JSON `null`.
+
+1. Start the local API and BLE bridge together with `npm start`.
+2. In the PlatformIO `esp32_bt` project, copy `include/secrets.example.h` to `include/secrets.h` and fill in the Wi-Fi name/password, API ingest URL, and a token of at least 32 characters. Set the same value as `ESP32_INGEST_TOKEN` in the environment before starting the server. For the local server, use `http://<computer-LAN-IP>:3000/api/ingest`. The ESP32 sends JSON every five seconds with `Content-Type: application/json` and an Authorization bearer token.
+3. Open the dashboard at `http://localhost:3000`; it polls the local API every second.
+
+The local BLE endpoint accepts uploads only from loopback. The older authenticated `/api/ingest` endpoint remains available if you configure ESP32 Wi-Fi telemetry separately.
+
+Bluetooth and Wi-Fi telemetry are separate options; the local laptop bridge is the recommended route when you want the ESP32’s BLE readings graphed on this computer without cloud hosting.
 
 ## Sensors
 
-The ESP32 firmware reads an ACS712-20A current sensor on GPIO34 and a battery voltage sensor on GPIO35. Current uses 0.100 V/A sensitivity, a 2.32 V zero-current offset, 10 averaged ADC samples, and a Kalman filter. Battery voltage uses a 0.93 slope, 0.95 V regression offset, a 4.8 divider ratio, and 20 averaged ADC samples. Verify calibration against the hardware and keep ADC inputs within 0–3.3 V.
+The ESP32 monitors battery current on GPIO34, battery voltage on GPIO35, solar voltage on GPIO32, and solar current on GPIO33. Both ACS712 channels use the shared 0.100 V/A sensitivity and 2.32 V zero-current offset, the 500–3300 mV input cutoff, 10 averaged ADC samples, and separate Kalman filters. Both voltage channels use the shared calibration formula `(sensor mV / 1000 * 4.8) * 0.93 + 0.95`. Calibrated values are sent over BLE and Wi-Fi and printed with V/A units on the serial monitor. The BLE float order and Wi-Fi field names remain the dashboard order: solar voltage/current, then battery voltage/current. Current polarity follows each ACS712's wiring direction; orient its marked current arrow with the intended positive current flow. Do not infer polarity from readings when a sensor is disconnected, because a floating ESP32 input can produce plausible but meaningless values. Verify the shared calibration against a multimeter and a known current reference before relying on the reported accuracy. Each voltage input is sampled 20 times using `analogReadMilliVolts`. The dashboard graphs each sensor separately; current readings within ±5.5 A, including small values, are plotted with an auto-scaled axis. Use a voltage divider or other appropriate conditioning to keep ESP32 ADC pins within 0–3.3 V; the ADC pins are not 12 V tolerant.

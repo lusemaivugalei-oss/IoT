@@ -5,8 +5,9 @@
   "description": "Microgrid Watch dashboard and ESP32 telemetry server",
   "main": "server.js",
   "scripts": {
-    "server": "node server.js",
-    "start": "node server.js"
+    "server": "node --env-file-if-exists=.env server.js",
+    "ble": "python ble_bridge.py",
+    "start": "concurrently --kill-others --names API,BLE \"npm run server\" \"npm run ble\""
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
